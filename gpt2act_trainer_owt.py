@@ -7,7 +7,7 @@ num_procs=10
 dataset_short_name = 'owt'
 dataset_name = ['openwebtext']
 dataset_split='train'
-dataset_dir = '/datasets/Huggingface/openwebtext'
+dataset_dir = '/content/gpt-act/data/openwebtext'
 
 # dataset_short_name = 'wt103'
 # dataset_name = ['wikitext', 'wikitext-103-v1']

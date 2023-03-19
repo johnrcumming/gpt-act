@@ -7,8 +7,9 @@ num_procs=10
 
 dataset_short_name = 'wt103'
 dataset_name = ['wikitext', 'wikitext-103-v1']
-dataset_split='train'
-dataset_dir = '/datasets/Huggingface/wikitext103_new'
+dataset_splits=['train', 'validation', 'test']
+dataset_dir = '/content/gptact/data/wikitext103'
+cache_dir = '/content/gptact/data/cache'
 #checkpoint = 'checkpoints/gpt2/wt103-6/checkpoint-7000'
 checkpoint = None
 
@@ -19,108 +20,113 @@ from datasets import load_dataset, DatasetDict
 
 
 from transformers import GPT2Tokenizer
-tokenizer = GPT2Tokenizer.from_pretrained(pretrained)
-tokenizer.pad_token = tokenizer.eos_token
 
-if not os.path.exists(dataset_dir):
-    raw_datasets = [load_dataset(*dataset_name, split=split) for split in dataset_splits ]
+def main():
+  tokenizer = GPT2Tokenizer.from_pretrained(pretrained)
+  tokenizer.pad_token = tokenizer.eos_token
 
-    if not block_size:
-        block_size = tokenizer.model_max_length
+  if not os.path.exists(dataset_dir):
+      raw_datasets = [load_dataset(*dataset_name, data_dir=dataset_dir, cache_dir=cache_dir, split=split) for split in dataset_splits ]
 
-    def tokenize_function(examples):
-        return tokenizer(examples["text"])
+#      if not block_size:
+      block_size = tokenizer.model_max_length
 
-    tok_datasets = [dataset.map(tokenize_function, num_proc=num_procs, batched=True, remove_columns=["text"]) for dataset in raw_datasets]
+      def tokenize_function(examples):
+          return tokenizer(examples["text"])
 
-    def group_texts(examples):
-    #    examples = tokenizer(examples['text'])
-        # Concatenate all texts.
-        concatenated_examples = {k: sum(examples[k], []) for k in examples.keys()}
-        total_length = len(concatenated_examples[list(examples.keys())[0]])
-        # We drop the small remainder, we could add padding if the model supported it instead of this drop, you can
-            # customize this part to your needs.
-        total_length = (total_length // block_size) * block_size
-        # Split by chunks of max_len.
-        result = {
-            k: [t[i : i + block_size] for i in range(0, total_length, block_size)]
-            for k, t in concatenated_examples.items()
-        }
-        result["labels"] = result["input_ids"].copy()
-        return result
+      tok_datasets = [dataset.map(tokenize_function, num_proc=num_procs, batched=True, remove_columns=["text"]) for dataset in raw_datasets]
 
-    datasets = [dataset.map(group_texts, num_proc=num_procs, batched=True) for dataset in tok_datasets]
+      def group_texts(examples):
+      #    examples = tokenizer(examples['text'])
+          # Concatenate all texts.
+          concatenated_examples = {k: sum(examples[k], []) for k in examples.keys()}
+          total_length = len(concatenated_examples[list(examples.keys())[0]])
+          # We drop the small remainder, we could add padding if the model supported it instead of this drop, you can
+              # customize this part to your needs.
+          total_length = (total_length // block_size) * block_size
+          # Split by chunks of max_len.
+          result = {
+              k: [t[i : i + block_size] for i in range(0, total_length, block_size)]
+              for k, t in concatenated_examples.items()
+          }
+          result["labels"] = result["input_ids"].copy()
+          return result
 
-    dataset = DatasetDict({split: dataset for split, dataset in zip(dataset_splits, datasets)})
-    dataset.save_to_disk(dataset_dir)
-    train_dataset = dataset['train']
-    val_dataset = dataset['validation']
-    test_dataset = dataset['test']
+      datasets = [dataset.map(group_texts, num_proc=num_procs, batched=True) for dataset in tok_datasets]
 
-else:
-    dataset = DatasetDict.load_from_disk(dataset_dir)
-    train_dataset = dataset['train']
-    val_dataset = dataset['validation']
-    test_dataset = dataset['test']
+      dataset = DatasetDict({split: dataset for split, dataset in zip(dataset_splits, datasets)})
+      dataset.save_to_disk(dataset_dir)
+      train_dataset = dataset['train']
+      val_dataset = dataset['validation']
+      test_dataset = dataset['test']
 
-print(train_dataset, val_dataset, test_dataset)
+  else:
+      dataset = DatasetDict.load_from_disk(dataset_dir)
+      train_dataset = dataset['train']
+      val_dataset = dataset['validation']
+      test_dataset = dataset['test']
 
-from transformers import GPT2Config
-config = GPT2Config.from_pretrained(pretrained)
+  print(train_dataset, val_dataset, test_dataset)
 
-from models.gpt2_act import GPT2ACTLMHeadModel
+  from transformers import GPT2Config
+  config = GPT2Config.from_pretrained(pretrained)
 
-model = GPT2ACTLMHeadModel(config)
+  from gpt2_act import GPT2ACTLMHeadModel
 
-from transformers import Trainer, TrainingArguments
+  model = GPT2ACTLMHeadModel(config)
 
-base_logging_dir = os.path.join('./runs', pretrained)
+  from transformers import Trainer, TrainingArguments
 
-if checkpoint:
-    checkpoint_dir = os.path.split(checkpoint)[0]
-    run_dir = os.path.split(checkpoint_dir)[1]
-    logging_dir = os.path.join(base_logging_dir, run_dir)
+  base_logging_dir = os.path.join('./runs', pretrained)
 
-else:
-    os.makedirs(base_logging_dir, exist_ok=True)
-    run_dir = dataset_short_name + '-' + str(len(os.listdir(base_logging_dir)))
-    logging_dir = os.path.join(base_logging_dir, run_dir)
-    checkpoint_dir = os.path.join('./checkpoints', pretrained, run_dir)
+  if checkpoint:
+      checkpoint_dir = os.path.split(checkpoint)[0]
+      run_dir = os.path.split(checkpoint_dir)[1]
+      logging_dir = os.path.join(base_logging_dir, run_dir)
 
-training_args = TrainingArguments(
-    output_dir= checkpoint_dir,          # output directory
-    logging_dir= logging_dir,
-    overwrite_output_dir=True,
-    num_train_epochs=5,              # total # of training epochs
-    per_device_train_batch_size=4,  # batch size per device during training
-    per_device_eval_batch_size=4,   # batch size for evaluation
-    warmup_steps=5000,                # number of warmup steps for learning rate scheduler
-    weight_decay=0.01,               # strength of weight decay
-    save_total_limit=5,
-    logging_steps=50,
-    evaluation_strategy='steps',
-    eval_steps=500,
-    load_best_model_at_end=True,
-    gradient_accumulation_steps=16,
-    ignore_data_skip=True
-#    fp16=True,
-)
+  else:
+      os.makedirs(base_logging_dir, exist_ok=True)
+      run_dir = dataset_short_name + '-' + str(len(os.listdir(base_logging_dir)))
+      logging_dir = os.path.join(base_logging_dir, run_dir)
+      checkpoint_dir = os.path.join('./checkpoints', pretrained, run_dir)
 
-model.parallelize()
-#model.copyweights(pretrained)
+  training_args = TrainingArguments(
+      output_dir= checkpoint_dir,          # output directory
+      logging_dir= logging_dir,
+      overwrite_output_dir=True,
+      num_train_epochs=5,              # total # of training epochs
+      per_device_train_batch_size=4,  # batch size per device during training
+      per_device_eval_batch_size=4,   # batch size for evaluation
+      warmup_steps=5000,                # number of warmup steps for learning rate scheduler
+      weight_decay=0.01,               # strength of weight decay
+      save_total_limit=5,
+      logging_steps=50,
+      evaluation_strategy='steps',
+      eval_steps=500,
+      load_best_model_at_end=True,
+      gradient_accumulation_steps=16,
+      ignore_data_skip=True
+  #    fp16=True,
+  )
 
-trainer = Trainer(
-    model=model,                         # the instantiated 🤗 Transformers model to be trained
-    args=training_args,                  # training arguments, defined above
-    train_dataset=train_dataset,         # training dataset
-    eval_dataset=test_dataset,            # evaluation dataset
-)
+  model.parallelize()
+  #model.copyweights(pretrained)
 
-try:
-    trainer.train(checkpoint)
-    trainer.save_model(os.path.join(training_args.output_dir, 'best'))
-except KeyboardInterrupt:
-    trainer.save_model(os.path.join(training_args.output_dir, 'interrupt'))
-except Exception as e:
-    traceback.print_exc()
-    trainer.save_model(os.path.join(training_args.output_dir, 'crash'))
+  trainer = Trainer(
+      model=model,                         # the instantiated 🤗 Transformers model to be trained
+      args=training_args,                  # training arguments, defined above
+      train_dataset=train_dataset,         # training dataset
+      eval_dataset=test_dataset,            # evaluation dataset
+  )
+
+  try:
+      trainer.train(checkpoint)
+      trainer.save_model(os.path.join(training_args.output_dir, 'best'))
+  except KeyboardInterrupt:
+      trainer.save_model(os.path.join(training_args.output_dir, 'interrupt'))
+  except Exception as e:
+      traceback.print_exc()
+      trainer.save_model(os.path.join(training_args.output_dir, 'crash'))
+
+if __name__ == "__main__":
+    main()
