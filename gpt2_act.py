@@ -16,7 +16,6 @@ from dataclasses import dataclass
 
 from argparse import ArgumentParser
 
-#from transformers.models.gpt2.modeling_gpt2 import PARALLELIZE_DOCSTRING, DEPARALLELIZE_DOCSTRING, GPT2_START_DOCSTRING, GPT2_INPUTS_DOCSTRING
 from transformers.models.gpt2.modeling_gpt2 import GPT2Block
 from transformers.models.gpt2.configuration_gpt2 import GPT2Config
 
@@ -28,6 +27,8 @@ from transformers.utils.model_parallel_utils import assert_device_map, get_devic
 from transformers.modeling_outputs import ModelOutput
 
 from transformers import GPT2LMHeadModel
+
+
 
 _CHECKPOINT_FOR_DOC = "gpt2"
 _CONFIG_FOR_DOC = "GPT2Config"
@@ -329,6 +330,43 @@ class ACTBlock(nn.Module):
 
 @dataclass
 class ACTModelOutputWithPastAndCrossAttentions(ModelOutput):
+    """
+    ACT model outputs, with potential hidden states and attentions.
+
+    Args:
+        last_hidden_state (`torch.FloatTensor` of shape `(batch_size, sequence_length, hidden_size)`):
+            Sequence of hidden-states at the output of the last layer of the model.
+        past_key_values (`tuple(tuple(torch.FloatTensor))`, *optional*, returned when `use_cache=True` is passed or when `config.use_cache=True`):
+            Tuple of `tuple(torch.FloatTensor)` of length `config.n_layers`, with each tuple having 2 tensors of shape
+            `(batch_size, num_heads, sequence_length, embed_size_per_head)`) and optionally if
+            `config.is_encoder_decoder=True` 2 additional tensors of shape `(batch_size, num_heads,
+            encoder_sequence_length, embed_size_per_head)`.
+
+            Contains pre-computed hidden-states (key and values in the self-attention blocks and optionally if
+            `config.is_encoder_decoder=True` in the cross-attention blocks) that can be used (see `past_key_values`
+            input) to speed up sequential decoding.
+        hidden_states (`tuple(torch.FloatTensor)`, *optional*, returned when `output_hidden_states=True` is passed or when `config.output_hidden_states=True`):
+            Tuple of `torch.FloatTensor` (one for the output of the embeddings, if the model has an embedding layer, +
+            one for the output of each layer) of shape `(batch_size, sequence_length, hidden_size)`.
+
+            Hidden-states of the model at the output of each layer plus the optional initial embedding outputs.
+        attentions (`tuple(torch.FloatTensor)`, *optional*, returned when `output_attentions=True` is passed or when `config.output_attentions=True`):
+            Tuple of `torch.FloatTensor` (one for each layer) of shape `(batch_size, num_heads, sequence_length,
+            sequence_length)`.
+
+            Attentions weights after the attention softmax, used to compute the weighted average in the self-attention
+            heads.
+        cross_attentions (`tuple(torch.FloatTensor)`, *optional*, returned when `output_attentions=True` and `config.add_cross_attention=True` is passed or when `config.output_attentions=True`):
+            Tuple of `torch.FloatTensor` (one for each layer) of shape `(batch_size, num_heads, sequence_length,
+            sequence_length)`.
+
+            Attentions weights of the decoder's cross-attention layer, after the attention softmax, used to compute the
+            weighted average in the cross-attention heads.
+        act_loss (torch.FloatTensor):
+            Adaptive Computation time loss
+        ponder_cost (torch.FloatTensor):
+            Adaptive Computation time ponder cost
+    """
     last_hidden_state: torch.FloatTensor = None
     past_key_values: Optional[List[torch.FloatTensor]] = None
     hidden_states: Optional[Tuple[torch.FloatTensor]] = None
@@ -339,6 +377,46 @@ class ACTModelOutputWithPastAndCrossAttentions(ModelOutput):
 
 @dataclass
 class ACTCausalLMOutputWithPastAndCrossAttentions(ModelOutput):
+    """
+    ACT model outputs, with potential hidden states and attentions.
+
+    Args:
+        loss (`torch.FloatTensor` of shape `(1,)`, *optional*, returned when `labels` is provided):
+            Language modeling loss (for next-token prediction).
+        logits (`torch.FloatTensor` of shape `(batch_size, sequence_length, config.vocab_size)`):
+            Prediction scores of the language modeling head (scores for each vocabulary token before SoftMax).
+
+        past_key_values (`tuple(tuple(torch.FloatTensor))`, *optional*, returned when `use_cache=True` is passed or when `config.use_cache=True`):
+            Tuple of `tuple(torch.FloatTensor)` of length `config.n_layers`, with each tuple having 2 tensors of shape
+            `(batch_size, num_heads, sequence_length, embed_size_per_head)`) and optionally if
+            `config.is_encoder_decoder=True` 2 additional tensors of shape `(batch_size, num_heads,
+            encoder_sequence_length, embed_size_per_head)`.
+
+            Contains pre-computed hidden-states (key and values in the self-attention blocks and optionally if
+            `config.is_encoder_decoder=True` in the cross-attention blocks) that can be used (see `past_key_values`
+            input) to speed up sequential decoding.
+        hidden_states (`tuple(torch.FloatTensor)`, *optional*, returned when `output_hidden_states=True` is passed or when `config.output_hidden_states=True`):
+            Tuple of `torch.FloatTensor` (one for the output of the embeddings, if the model has an embedding layer, +
+            one for the output of each layer) of shape `(batch_size, sequence_length, hidden_size)`.
+
+            Hidden-states of the model at the output of each layer plus the optional initial embedding outputs.
+        attentions (`tuple(torch.FloatTensor)`, *optional*, returned when `output_attentions=True` is passed or when `config.output_attentions=True`):
+            Tuple of `torch.FloatTensor` (one for each layer) of shape `(batch_size, num_heads, sequence_length,
+            sequence_length)`.
+
+            Attentions weights after the attention softmax, used to compute the weighted average in the self-attention
+            heads.
+        cross_attentions (`tuple(torch.FloatTensor)`, *optional*, returned when `output_attentions=True` and `config.add_cross_attention=True` is passed or when `config.output_attentions=True`):
+            Tuple of `torch.FloatTensor` (one for each layer) of shape `(batch_size, num_heads, sequence_length,
+            sequence_length)`.
+
+            Attentions weights of the decoder's cross-attention layer, after the attention softmax, used to compute the
+            weighted average in the cross-attention heads.
+        act_loss (torch.FloatTensor):
+            Adaptive Computation time loss
+        ponder_cost (torch.FloatTensor):
+            Adaptive Computation time ponder cost
+    """
     loss: Optional[torch.FloatTensor] = None
     logits: torch.FloatTensor = None
     past_key_values: Optional[List[torch.FloatTensor]] = None
@@ -366,6 +444,7 @@ GPT2_START_DOCSTRING = r"""
 """
 
 GPT2_INPUTS_DOCSTRING = r"""
+
     Args:
         input_ids (`torch.LongTensor` of shape `(batch_size, input_ids_length)`):
             `input_ids_length` = `sequence_length` if `past_key_values` is `None` else
@@ -467,6 +546,8 @@ PARALLELIZE_DOCSTRING = r"""
 DEPARALLELIZE_DOCSTRING = r"""
     Moves the model to cpu from a model parallel state.
 
+    Args:
+
     Example:
 
     ```python
@@ -496,7 +577,7 @@ class GPT2ACTModel(GPT2ACTPreTrainedModel):
         self.wpe = nn.Embedding(config.n_positions, config.n_embd) # Position Embedding
         self.drop = nn.Dropout(config.embd_pdrop)
         self.ln_f = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
-        self.act_f = ACTBlock(GPT2Block(config.n_ctx, config, scale=True), config.n_layer, config.n_embd)
+        self.act_f = ACTBlock(GPT2Block(config), config.n_layer, config.n_embd)
         self.init_weights()
         # Model parallel
         self.model_parallel = False
@@ -769,8 +850,7 @@ class GPT2ACTLMHeadModel(GPT2ACTPreTrainedModel):
 
     @add_start_docstrings_to_model_forward(GPT2_INPUTS_DOCSTRING)
     @add_code_sample_docstrings(
-        tokenizer_class=_TOKENIZER_FOR_DOC,
-        checkpoint="gpt2",
+        checkpoint=_CHECKPOINT_FOR_DOC,
         output_type=ACTCausalLMOutputWithPastAndCrossAttentions,
         config_class=_CONFIG_FOR_DOC,
     )

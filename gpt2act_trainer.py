@@ -95,18 +95,18 @@ def main():
       logging_dir= logging_dir,
       overwrite_output_dir=True,
       num_train_epochs=5,              # total # of training epochs
-      per_device_train_batch_size=4,  # batch size per device during training
-      per_device_eval_batch_size=4,   # batch size for evaluation
+      per_device_train_batch_size=2,  # batch size per device during training
+      per_device_eval_batch_size=2,   # batch size for evaluation
       warmup_steps=5000,                # number of warmup steps for learning rate scheduler
       weight_decay=0.01,               # strength of weight decay
       save_total_limit=5,
-      logging_steps=50,
+      logging_steps=10,
       evaluation_strategy='steps',
       eval_steps=500,
       load_best_model_at_end=True,
-      gradient_accumulation_steps=16,
-      ignore_data_skip=True
-  #    fp16=True,
+      gradient_accumulation_steps=128,
+      ignore_data_skip=True,
+      fp16=True,
   )
 
   model.parallelize()
