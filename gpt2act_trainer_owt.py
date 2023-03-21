@@ -19,7 +19,8 @@ import transformers
 transformers.utils.logging.set_verbosity_info()
 
 from datasets import list_datasets, load_dataset, list_metrics, load_metric, DatasetDict, Dataset
-def main():
+
+def build_dataset():
     if not os.path.exists(dataset_dir):
         train_raw_dataset = load_dataset(*dataset_name, data_dir=dataset_dir, cache_dir=cache_dir, split=dataset_split)
 
@@ -60,6 +61,7 @@ def main():
         train_tok_dataset.cleanup_cache_files()
         train_lm_dataset.cleanup_cache_files()
 
+def train():
     dataset = DatasetDict.load_from_disk(dataset_dir)
     train_dataset = dataset['train']
     test_dataset =  dataset['test']
@@ -122,4 +124,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    build_dataset()
+    train()
