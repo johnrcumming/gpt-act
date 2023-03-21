@@ -8,11 +8,11 @@ num_procs=10
 dataset_short_name = 'owt'
 dataset_name = ['openwebtext']
 dataset_split='train'
-dataset_dir = '/content/gptact/data/openwebtext'
-cache_dir = '/content/gptact/data/cache'
+dataset_dir = '/content/data/openwebtext'
+cache_dir = '/content/data/cache'
 #cache_dir = '/content/cache'
-base_logging_dir='/content/gptact/runs'
-checkpoint_dir='/content/gptact/checkpoints'
+base_logging_dir='/content/data/runs'
+checkpoint_dir='/content/data/checkpoints'
 checkpoint=None
 
 import transformers
