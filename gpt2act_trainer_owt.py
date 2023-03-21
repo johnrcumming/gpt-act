@@ -20,9 +20,13 @@ transformers.utils.logging.set_verbosity_info()
 
 from datasets import list_datasets, load_dataset, list_metrics, load_metric, DatasetDict, Dataset
 
-def build_dataset():
+def load_owt_dataset():
+    return load_dataset(*dataset_name, data_dir=dataset_dir, cache_dir=cache_dir, split=dataset_split)
+
+def build_dataset(train_raw_dataset=None):
     if not os.path.exists(dataset_dir):
-        train_raw_dataset = load_dataset(*dataset_name, data_dir=dataset_dir, cache_dir=cache_dir, split=dataset_split)
+        if train_raw_dataset is None:
+            train_raw_dataset = load_owt_dataset()
 
         from transformers import GPT2Tokenizer
         tokenizer = GPT2Tokenizer.from_pretrained(pretrained)
