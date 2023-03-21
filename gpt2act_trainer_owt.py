@@ -8,8 +8,11 @@ num_procs=10
 dataset_short_name = 'owt'
 dataset_name = ['openwebtext']
 dataset_split='train'
-dataset_dir = '/content/gpt-act/data/openwebtext'
+dataset_dir = '/content/gptact/data/openwebtext'
 cache_dir = '/content/gptact/data/cache'
+#cache_dir = '/content/cache'
+base_logging_dir='/content/gptact/runs'
+checkpoint_dir='/content/gptact/checkpoints'
 checkpoint=None
 
 import transformers
@@ -48,7 +51,7 @@ def main():
 
         train_lm_dataset = train_tok_dataset.map(group_texts, num_proc=num_procs, batched=True)
 
-        dataset = train_lm_dataset.train_test_split(test_size=0.01, shuffle=True)
+        dataset = train_lm_dataset.train_test_split(test_size=0.005, shuffle=True)
 
         dataset.save_to_disk(dataset_dir)
         train_dataset = dataset['train']
@@ -73,11 +76,11 @@ def main():
 
     from transformers import Trainer, TrainingArguments
 
-    base_logging_dir = os.path.join('./runs', pretrained)
+    #base_logging_dir = os.path.join('./runs', pretrained)
     os.makedirs(base_logging_dir, exist_ok=True)
-    run_dir = dataset_short_name + '-6' #+ str(len(os.listdir(base_logging_dir)))
+    run_dir = dataset_short_name + str(len(os.listdir(base_logging_dir)))
     logging_dir = os.path.join(base_logging_dir, run_dir)
-    checkpoint_dir = os.path.join('./checkpoints', pretrained, run_dir)
+    #checkpoint_dir = os.path.join('./checkpoints', pretrained, run_dir)
 
     training_args = TrainingArguments(
         output_dir= checkpoint_dir,          # output directory
@@ -91,9 +94,9 @@ def main():
         save_total_limit=5,
         logging_steps=10,
         evaluation_strategy='steps',
-        eval_steps=50,
+        eval_steps=500,
         load_best_model_at_end=True,
-        gradient_accumulation_steps=128,
+        gradient_accumulation_steps=256,
         ignore_data_skip=True,
         fp16=True,
     )

@@ -104,7 +104,7 @@ def main():
       evaluation_strategy='steps',
       eval_steps=500,
       load_best_model_at_end=True,
-      gradient_accumulation_steps=128,
+      gradient_accumulation_steps=256,
       ignore_data_skip=True,
       fp16=True,
   )
