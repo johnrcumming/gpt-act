@@ -15,9 +15,9 @@ from gpt2_act import GPT2ACTLMHeadModel
 
 
 
-def preprocess_dataset(dataset_dir, config, dataset_name, cache_dir, dataset_split, num_procs=10):
+def preprocess_dataset(dataset_dir, config, dataset_name, cache_dir, dataset_splits=None, num_procs=10):
     if not os.path.exists(dataset_dir):
-        train_raw_dataset = load_dataset(dataset_name, data_dir=dataset_dir, cache_dir=cache_dir, split=dataset_split)
+        train_raw_dataset = load_dataset(dataset_name, data_dir=dataset_dir, cache_dir=cache_dir, split=dataset_splits)
 
         tokenizer = GPT2Tokenizer.from_pretrained(config)
         tokenizer.pad_token = tokenizer.eos_token
@@ -46,7 +46,7 @@ def preprocess_dataset(dataset_dir, config, dataset_name, cache_dir, dataset_spl
 
         train_lm_dataset = train_tok_dataset.map(group_texts, num_proc=num_procs, batched=True)
 
-        dataset = train_lm_dataset.train_test_split(test_size=0.005, shuffle=True)
+        dataset = train_lm_dataset['train'].train_test_split(test_size=0.005, shuffle=True)
 
         dataset.save_to_disk(dataset_dir)
         train_dataset = dataset['train']
@@ -144,6 +144,7 @@ def main():
 
     if args.preprocess_dataset:
         preprocess_dataset(args.dataset_dir, args.config, args.dataset_name, args.cache_dir, args.dataset_split, num_procs=args.num_procs)
+        
     if args.train:
         train(args.dataset_dir, args.log_dir, args.checkpoint_dir, args.dataset_name,
                 num_train_epochs=args.train_epochs, train_batch_size=args.train_batch_size, eval_batch_size=args.eval_batch_size,

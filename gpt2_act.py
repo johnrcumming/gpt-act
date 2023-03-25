@@ -416,6 +416,8 @@ class ACTCausalLMOutputWithPastAndCrossAttentions(ModelOutput):
             Adaptive Computation time loss
         ponder_cost (torch.FloatTensor):
             Adaptive Computation time ponder cost
+        fct_loss (torch.FloatTensor):
+            loss in the transformer model
     """
     loss: Optional[torch.FloatTensor] = None
     logits: torch.FloatTensor = None
@@ -425,6 +427,8 @@ class ACTCausalLMOutputWithPastAndCrossAttentions(ModelOutput):
     cross_attentions: Optional[Tuple[torch.FloatTensor]] = None
     act_loss: Optional[torch.FloatTensor] = None
     ponder_cost: Optional[torch.FloatTensor] = None
+    fct_loss: Optional[torch.FloatTensor] = None
+
 
 
 GPT2_START_DOCSTRING = r"""
@@ -910,8 +914,8 @@ class GPT2ACTLMHeadModel(GPT2ACTPreTrainedModel):
             shift_labels = labels[..., 1:].contiguous()
             # Flatten the tokens
             loss_fct = nn.CrossEntropyLoss()
-            loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
-            loss = loss + transformer_outputs.act_loss
+            loss_fct = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+            loss = loss_fct + transformer_outputs.act_loss
 
         if not return_dict:
             output = (lm_logits,) + transformer_outputs[1:]
@@ -925,7 +929,8 @@ class GPT2ACTLMHeadModel(GPT2ACTPreTrainedModel):
             attentions=transformer_outputs.attentions,
             cross_attentions=transformer_outputs.cross_attentions,
             act_loss=transformer_outputs.act_loss,
-            ponder_cost=transformer_outputs.ponder_cost,            
+            ponder_cost=transformer_outputs.ponder_cost,    
+            fct_loss=loss_fct      
         )
 
 
