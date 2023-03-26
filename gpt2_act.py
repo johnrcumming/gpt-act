@@ -328,6 +328,13 @@ class ACTBlock(nn.Module):
 
         return [previous_state, presents, all_hidden_states, all_self_attentions, all_cross_attentions, act_loss, ponder_cost]
 
+
+class GPT2ACTConfig(GPT2Config):
+    def __init__(self, act_commitment_cost=1e-3, **kwargs):
+        self.act_commitment_cost = act_commitment_cost
+        super().__init__(**kwargs)
+
+
 @dataclass
 class ACTModelOutputWithPastAndCrossAttentions(ModelOutput):
     """
@@ -577,11 +584,16 @@ class GPT2ACTModel(GPT2ACTPreTrainedModel):
     def __init__(self, config):
         super().__init__(config)
 
+        if isinstance(config, GPT2ACTConfig):
+            act_commitment_cost = config.act_commitment_cost
+        else:
+            act_commitment_cost = 1e-3
+
         self.wte = nn.Embedding(config.vocab_size, config.n_embd)  # Word Embedding 
         self.wpe = nn.Embedding(config.n_positions, config.n_embd) # Position Embedding
         self.drop = nn.Dropout(config.embd_pdrop)
         self.ln_f = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
-        self.act_f = ACTBlock(GPT2Block(config), config.n_layer, config.n_embd)
+        self.act_f = ACTBlock(GPT2Block(config), config.n_layer, config.n_embd, act_commitment_cost=act_commitment_cost)
         self.init_weights()
         # Model parallel
         self.model_parallel = False
@@ -779,8 +791,6 @@ class GPT2ACTModel(GPT2ACTPreTrainedModel):
             act_loss=act_loss,
             ponder_cost=ponder_cost,
         )
-    
-    
     
 class GPT2ACTLMHeadModel(GPT2ACTPreTrainedModel):
     _keys_to_ignore_on_load_missing = [r"h\.\d+\.attn\.masked_bias", r"lm_head\.weight"]
