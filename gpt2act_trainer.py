@@ -84,7 +84,7 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
     val_dataset =  dataset['validation']
 
     config = GPT2Config.from_pretrained(model_config)
-    model = GPT2ACTLMHeadModel(model_config)
+    model = GPT2ACTLMHeadModel(config)
 
     os.makedirs(base_logging_dir, exist_ok=True)
     run_dir = dataset_name + str(len(os.listdir(base_logging_dir)))

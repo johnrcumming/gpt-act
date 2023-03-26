@@ -30,9 +30,14 @@ from transformers import GPT2LMHeadModel
 
 
 
-_CHECKPOINT_FOR_DOC = "gpt2"
-_CONFIG_FOR_DOC = "GPT2Config"
+_CHECKPOINT_FOR_DOC = "gpt2act"
+_CONFIG_FOR_DOC = "GPT2ACTConfig"
 _TOKENIZER_FOR_DOC = "GPT2Tokenizer"
+
+class GPT2ACTConfig(GPT2Config):
+    def __init__(self, act_commitment_cost=1e-3, **kwargs):
+        self.act_commitment_cost = act_commitment_cost
+        super().__init__(**kwargs)
 
 class GPT2ACTPreTrainedModel(PreTrainedModel):
     """
@@ -40,7 +45,7 @@ class GPT2ACTPreTrainedModel(PreTrainedModel):
     models.
     """
 
-    config_class = GPT2Config
+    config_class = GPT2ACTConfig
     base_model_prefix = "transformer"
     is_parallelizable = True
 
@@ -327,12 +332,6 @@ class ACTBlock(nn.Module):
         act_loss = self._act_commitment_cost * torch.sum(torch.sum(p_t,dim=p_t_dims)/p_t_size/p_t.shape[0])
 
         return [previous_state, presents, all_hidden_states, all_self_attentions, all_cross_attentions, act_loss, ponder_cost]
-
-
-class GPT2ACTConfig(GPT2Config):
-    def __init__(self, act_commitment_cost=1e-3, **kwargs):
-        self.act_commitment_cost = act_commitment_cost
-        super().__init__(**kwargs)
 
 
 @dataclass
