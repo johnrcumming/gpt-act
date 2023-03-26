@@ -167,7 +167,7 @@ def main():
         train(args.data_dir, args.log_dir, args.checkpoint_dir, args.dataset_name,
                 num_train_epochs=args.train_epochs, train_batch_size=args.train_batch_size, eval_batch_size=args.eval_batch_size,
                 gradient_accumulation_steps=args.gradient_accumulation_steps, parallelize=args.parallelize,
-                model_config=args.config, pretrained_weights=None, checkpoint=args.checkpoint, verbose=args.verbose)
+                model_config=args.model_config, pretrained_weights=None, checkpoint=args.checkpoint, verbose=args.verbose)
 
 if __name__ == "__main__":
     main()
