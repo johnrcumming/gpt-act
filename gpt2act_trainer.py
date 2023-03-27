@@ -14,41 +14,65 @@ from transformers import Trainer, TrainingArguments
 
 from gpt2_act import GPT2ACTLMHeadModel
 
+def group_texts(block_size, tokenizer=None):
+    def group_texts_fn(examples):
+        if tokenizer is not None:
+            examples = tokenizer(examples['text'])
+        # Concatenate all texts.
+        concatenated_examples = {k: sum(examples[k], []) for k in examples.keys() }
+        total_length = len(concatenated_examples[list(examples.keys())[0]])
+        # We drop the small remainder, we could add padding if the model supported it instead of this drop, you can
+            # customize this part to your needs.
+        total_length = (total_length // block_size) * block_size
+        # Split by chunks of max_len.
+        result = {
+            k: [t[i : i + block_size] for i in range(0, total_length, block_size)]
+            for k, t in concatenated_examples.items()
+        }
+        result["labels"] = result["input_ids"].copy()
+        return result
+    return group_texts_fn
 
-def preprocess_dataset(model_config, data_dir='data', cache_dir='data/cache' , dataset_name='wikitext', dataset_config=None, num_procs=10, val_size=0.05, test_size=0.05, debug=False):
+def load_streaming_dataset(model_config, data_dir='data', dataset_name='wikitext', dataset_config=None, num_procs=10, val_size=0.05, test_size=0.05):
+    """Load a streaming dataset from the datasets library, and preprocess it for training."""
     dataset_dir = os.path.join(data_dir, dataset_name)
+    cache_dir = os.path.join(data_dir, 'cache')
+
+    if dataset_config is None:
+        dataset_config = datasets.get_dataset_config_names(dataset_name)[0]
+
+    tokenizer = GPT2Tokenizer.from_pretrained(model_config)
+    tokenizer.pad_token = tokenizer.eos_token
+
+    dataset = datasets.load_dataset(dataset_name, dataset_config, data_dir=dataset_dir, cache_dir=cache_dir, streaming=True)
+    dataset = dataset.map(group_texts(tokenizer.model_max_length, tokenizer=tokenizer), batched=True)
+
+    if 'validation' not in dataset:
+        subdataset = dataset['train'].train_test_split(test_size=val_size, shuffle=True)
+        dataset['train'] = subdataset['train']
+        dataset['validation'] = subdataset['test']
+
+    if 'test' not in dataset:
+        subdataset = dataset['train'].train_test_split(test_size=test_size, shuffle=True)
+        dataset['train'] = subdataset['train']
+        dataset['test'] = subdataset['test']
+    return dataset
+
+def preprocess_dataset(model_config, data_dir='data', dataset_name='wikitext', dataset_config=None, num_procs=10, val_size=0.05, test_size=0.05):
+    """Load a dataset from the datasets library, and preprocess it for training. and save dataset locally."""
+    dataset_dir = os.path.join(data_dir, dataset_name)
+    cache_dir = os.path.join(data_dir, 'cache')
+
     if not os.path.exists(dataset_dir):
         if dataset_config is None:
             dataset_config = datasets.get_dataset_config_names(dataset_name)[0]
 
-        raw_dataset = datasets.load_dataset(dataset_name, dataset_config, data_dir=dataset_dir, cache_dir=cache_dir)
-        print(raw_dataset)
         tokenizer = GPT2Tokenizer.from_pretrained(model_config)
         tokenizer.pad_token = tokenizer.eos_token
 
-        block_size = tokenizer.model_max_length
-        def tokenize_function(examples):
-            return tokenizer(examples["text"])
-
-        dataset = tok_dataset = raw_dataset.map(lambda examples: tokenizer(examples["text"]), num_proc=num_procs, batched=True, remove_columns=["text"])
-
-        def group_texts(examples):
-        #    examples = tokenizer(examples['text'])
-            # Concatenate all texts.
-            concatenated_examples = {k: sum(examples[k], []) for k in examples.keys() }
-            total_length = len(concatenated_examples[list(examples.keys())[0]])
-            # We drop the small remainder, we could add padding if the model supported it instead of this drop, you can
-                # customize this part to your needs.
-            total_length = (total_length // block_size) * block_size
-            # Split by chunks of max_len.
-            result = {
-                k: [t[i : i + block_size] for i in range(0, total_length, block_size)]
-                for k, t in concatenated_examples.items()
-            }
-            result["labels"] = result["input_ids"].copy()
-            return result
-
-        dataset = lm_dataset = tok_dataset.map(group_texts, num_proc=num_procs, batched=True)
+        raw_dataset = datasets.load_dataset(dataset_name, dataset_config, data_dir=dataset_dir, cache_dir=cache_dir)
+        dataset = tok_dataset = dataset.map(lambda examples: tokenizer(examples["text"]), num_proc=num_procs, batched=True, remove_columns=["text"])
+        dataset = lm_dataset = tok_dataset.map(group_texts(tokenizer.model_max_length), num_proc=num_procs, batched=True)
 
         if 'validation' not in dataset:
             subdataset = dataset['train'].train_test_split(test_size=val_size, shuffle=True)
@@ -56,7 +80,7 @@ def preprocess_dataset(model_config, data_dir='data', cache_dir='data/cache' , d
             dataset['validation'] = subdataset['test']
 
         if 'test' not in dataset:
-            subdataset = dataset['train'].train_test_split(test_size=val_size, shuffle=True)
+            subdataset = dataset['train'].train_test_split(test_size=test_size, shuffle=True)
             dataset['train'] = subdataset['train']
             dataset['test'] = subdataset['test']
 
@@ -72,14 +96,20 @@ def preprocess_dataset(model_config, data_dir='data', cache_dir='data/cache' , d
 
 def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
           num_train_epochs=5, train_batch_size=2, eval_batch_size=2, gradient_accumulation_steps=256, parallelize=False,
-          model_config='gpt2-xl', pretrained_weights=None, checkpoint=None, verbose=True):
-
-    dataset_dir = os.path.join(data_dir, dataset_name)
+          model_config='gpt2-xl', pretrained_weights=None, checkpoint=None, verbose=True, stream_dataset=False, fp16=False):
     
+    """Train a GPT2ACT model on a dataset."""
+
     if verbose:
         transformers.utils.logging.set_verbosity_info()
 
-    dataset = datasets.DatasetDict.load_from_disk(dataset_dir)
+
+    if stream_dataset:
+        dataset = load_streaming_dataset(model_config, data_dir=data_dir, dataset_name=dataset_name)
+    else:
+        dataset_dir = os.path.join(data_dir, dataset_name)
+        dataset = datasets.DatasetDict.load_from_disk(dataset_dir)
+
     train_dataset = dataset['train']
     val_dataset =  dataset['validation']
 
@@ -106,7 +136,7 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
         load_best_model_at_end=True,
         gradient_accumulation_steps=gradient_accumulation_steps,
         ignore_data_skip=True,
-        fp16=True,
+        fp16=fp16,
     )
 
     if parallelize:
@@ -142,10 +172,9 @@ def main():
     parser.add_argument('--dataset_name', type=str, default="openwebtext", help='Huggingface Datasets Name.')
     parser.add_argument('--dataset_config', type=str, default=None, help='Huggingface Datasets Configuration Name.')
 
-    parser.add_argument('--data_dir', type=str, default='/content/data', help='Dataset Directory.')
-    parser.add_argument('--cache_dir', type=str, default='/content/data/cache', help='Dataset Cache Dir.')
-    parser.add_argument('--log_dir', type=str, default='/content/data/runs', help='Tensorboard Log Dir.')
-    parser.add_argument('--checkpoint_dir', type=str, default='/content/data/checkpoints', help='Ceckpoint Save Dir.')
+    parser.add_argument('--data_dir', type=str, default='data', help='Dataset Directory.')
+    parser.add_argument('--log_dir', type=str, default='runs', help='Tensorboard Log Dir.')
+    parser.add_argument('--checkpoint_dir', type=str, default='checkpoints', help='Ceckpoint Save Dir.')
     parser.add_argument('--checkpoint', type=str, default=None, help='Ceckpoint to Continue From.')
 
     parser.add_argument('--num_procs', type=int, default=10, help='Number of Processes for Dataset Processing.')
@@ -155,19 +184,21 @@ def main():
     parser.add_argument('--gradient_accumulation_steps', type=int, default=256, help='Gradient Accumulation Steps.')
     parser.add_argument('--parallelize', default=False, action='store_true', help='Parallelize Model - split model across GPUs.')
     parser.add_argument('--verbose', default=False, action='store_true', help='Verbose Logging.')
+    parser.add_argument('--stream_dataset', default=False, action='store_true', help='Stream Dataset.')
+    parser.add_argument('--fp16', default=False, action='store_true', help='FP16 Training.')
 
 
     args = parser.parse_args()
 
     if args.preprocess_dataset:
-        preprocess_dataset(args.model_config, data_dir=args.data_dir, cache_dir=args.cache_dir, 
+        preprocess_dataset(args.model_config, data_dir=args.data_dir, 
                            dataset_name=args.dataset_name, dataset_config=args.dataset_config, num_procs=args.num_procs)
 
     if args.train_model:
         train(args.data_dir, args.log_dir, args.checkpoint_dir, args.dataset_name,
                 num_train_epochs=args.train_epochs, train_batch_size=args.train_batch_size, eval_batch_size=args.eval_batch_size,
                 gradient_accumulation_steps=args.gradient_accumulation_steps, parallelize=args.parallelize,
-                model_config=args.model_config, pretrained_weights=None, checkpoint=args.checkpoint, verbose=args.verbose)
+                model_config=args.model_config, pretrained_weights=None, checkpoint=args.checkpoint, verbose=args.verbose, stream_dataset=args.stream_dataset, fp16=args.fp16)
 
 if __name__ == "__main__":
     main()

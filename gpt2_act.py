@@ -1,20 +1,11 @@
-import os
-import json
-import math
-
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import torchvision.utils as vUtils
-import torchvision.transforms as vTransforms
 
 import numpy as np
 
 from typing import List, Optional, Tuple
 from dataclasses import dataclass
-
-from argparse import ArgumentParser
 
 from transformers.models.gpt2.modeling_gpt2 import GPT2Block
 from transformers.models.gpt2.configuration_gpt2 import GPT2Config
@@ -1071,8 +1062,8 @@ class GPT2ACTDistilation(GPT2ACTPreTrainedModel):
             if self.model_parallel:
                 teacher_outputs.logits = teacher_outputs.logits.to(self.first_device)
 
-            kd_loss = F.kl_div(F.log_softmax(student_outputs.logits/self._temperature, dim=1),
-                                F.softmax(teacher_outputs.logits/self._temperature, dim=1),
+            kd_loss = torch.nn.functional.kl_div(torch.nn.functional.log_softmax(student_outputs.logits/self._temperature, dim=1),
+                                torch.nn.functional.softmax(teacher_outputs.logits/self._temperature, dim=1),
                                 reduction='batchmean') * self._temperature * self._temperature
             student_outputs.loss +=  kd_loss * self._lambda_kd
             return student_outputs
