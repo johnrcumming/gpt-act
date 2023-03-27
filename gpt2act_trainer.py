@@ -87,7 +87,7 @@ def preprocess_dataset(model_config, data_dir='data', dataset_name='wikitext', d
 
 def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
           num_train_epochs=5, train_batch_size=2, eval_batch_size=2, gradient_accumulation_steps=256, parallelize=False,
-          model_config='gpt2-xl', pretrained_weights=None, checkpoint=None, verbose=True, stream_dataset=False, fp16=False):
+          model_config='gpt2-xl', pretrained_weights=None, checkpoint=None, verbose=True, stream_dataset=False, fp16=False, max_steps=-1):
     
     """Train a GPT2ACT model on a dataset."""
 
@@ -130,6 +130,7 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
         gradient_accumulation_steps=gradient_accumulation_steps,
         ignore_data_skip=True,
         fp16=fp16,
+        max_steps=max_steps,
     )
 
     if parallelize:
@@ -179,6 +180,7 @@ def main():
     parser.add_argument('--verbose', default=False, action='store_true', help='Verbose Logging.')
     parser.add_argument('--stream_dataset', default=False, action='store_true', help='Stream Dataset.')
     parser.add_argument('--fp16', default=False, action='store_true', help='FP16 Training.')
+    parser.add_argument('--max_steps', type=int, default=-1, help='Number of train steps for streaming_datasets.')
 
 
     args = parser.parse_args()
@@ -191,7 +193,7 @@ def main():
         train(args.data_dir, args.log_dir, args.checkpoint_dir, args.dataset_name,
                 num_train_epochs=args.train_epochs, train_batch_size=args.train_batch_size, eval_batch_size=args.eval_batch_size,
                 gradient_accumulation_steps=args.gradient_accumulation_steps, parallelize=args.parallelize,
-                model_config=args.model_config, pretrained_weights=None, checkpoint=args.checkpoint, verbose=args.verbose, stream_dataset=args.stream_dataset, fp16=args.fp16)
+                model_config=args.model_config, pretrained_weights=None, checkpoint=args.checkpoint, verbose=args.verbose, stream_dataset=args.stream_dataset, fp16=args.fp16, max_steps=args.max_steps)
 
 if __name__ == "__main__":
     main()
