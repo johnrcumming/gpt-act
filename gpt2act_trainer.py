@@ -47,15 +47,6 @@ def load_streaming_dataset(model_config, data_dir='data', dataset_name='wikitext
     dataset = datasets.load_dataset(dataset_name, dataset_config, data_dir=dataset_dir, cache_dir=cache_dir, streaming=True)
     dataset = dataset.map(group_texts(tokenizer.model_max_length, tokenizer=tokenizer), batched=True)
 
-    if 'validation' not in dataset:
-        subdataset = dataset['train'].train_test_split(test_size=val_size, shuffle=True)
-        dataset['train'] = subdataset['train']
-        dataset['validation'] = subdataset['test']
-
-    if 'test' not in dataset:
-        subdataset = dataset['train'].train_test_split(test_size=test_size, shuffle=True)
-        dataset['train'] = subdataset['train']
-        dataset['test'] = subdataset['test']
     return dataset
 
 def preprocess_dataset(model_config, data_dir='data', dataset_name='wikitext', dataset_config=None, num_procs=10, val_size=0.05, test_size=0.05):
@@ -106,12 +97,14 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
 
     if stream_dataset:
         dataset = load_streaming_dataset(model_config, data_dir=data_dir, dataset_name=dataset_name)
+        train_dataset = dataset['train']
+        val_dataset = dataset['validation'] if 'validation' in dataset else None
+
     else:
         dataset_dir = os.path.join(data_dir, dataset_name)
         dataset = datasets.DatasetDict.load_from_disk(dataset_dir)
-
-    train_dataset = dataset['train']
-    val_dataset =  dataset['validation']
+        train_dataset = dataset['train']
+        val_dataset = dataset['validation']
 
     config = GPT2Config.from_pretrained(model_config)
     model = GPT2ACTLMHeadModel(config)
