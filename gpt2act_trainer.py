@@ -50,10 +50,11 @@ def load_streaming_dataset(model_config, data_dir='data', dataset_name='wikitext
 
     return dataset
 
-def preprocess_dataset(model_config, data_dir='data', dataset_name='wikitext', dataset_config=None, num_procs=10, val_size=0.05, test_size=0.05):
+def preprocess_dataset(model_config, data_dir='data', cache_dir=None, dataset_name='wikitext', dataset_config=None, num_procs=10, val_size=0.05, test_size=0.05):
     """Load a dataset from the datasets library, and preprocess it for training. and save dataset locally."""
     dataset_dir = os.path.join(data_dir, dataset_name)
-    cache_dir = os.path.join(data_dir, 'cache')
+    if cache_dir is None:
+        cache_dir = os.path.join(data_dir, 'cache')
 
     if not os.path.exists(dataset_dir):
         if dataset_config is None:
@@ -88,7 +89,8 @@ def preprocess_dataset(model_config, data_dir='data', dataset_name='wikitext', d
 
 def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
           num_train_epochs=5, train_batch_size=2, eval_batch_size=2, gradient_accumulation_steps=256, parallelize=False,
-          model_config='gpt2-xl', pretrained_weights=None, checkpoint=None, verbose=True, stream_dataset=False, fp16=False, max_steps=-1):
+          model_config='gpt2-xl', pretrained_weights=None, checkpoint=None, verbose=True, fp16=False, 
+          stream_dataset=False, max_steps=-1, storage_options=None):
     
     """Train a GPT2ACT model on a dataset."""
 
@@ -102,8 +104,7 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
         val_dataset = dataset['validation'] if 'validation' in dataset else None
 
     else:
-        dataset_dir = os.path.join(data_dir, dataset_name)
-        dataset = datasets.DatasetDict.load_from_disk(dataset_dir)
+        dataset = datasets.load_from_disk(data_dir, storage_options=storage_options)
         train_dataset = dataset['train']
         val_dataset = dataset['validation']
 
