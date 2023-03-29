@@ -88,6 +88,7 @@ def preprocess_dataset(model_config, data_dir='data', cache_dir=None, dataset_na
 
 def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
           num_train_epochs=5, train_batch_size=2, eval_batch_size=2, gradient_accumulation_steps=256, parallelize=False,
+          gradient_checkpointing=False, act_commitment_cost=1e-3,
           model_config='gpt2-xl', pretrained_weights=None, checkpoint=None, verbose=True, fp16=False, 
           stream_dataset=False, max_steps=-1, storage_options=None):
     
@@ -107,7 +108,8 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
         train_dataset = dataset['train']
         val_dataset = dataset['validation']
 
-    config = GPT2Config.from_pretrained(model_config)
+    gpt2_config = GPT2Config.from_pretrained(model_config)
+    config = GPT2ACTConfig(act_commitment_cost=act_commitment_cost, gradient_checkpointing=gradient_checkpointing, **gpt2_config.to_dict())
     model = GPT2ACTLMHeadModel(config)
 
     os.makedirs(base_logging_dir, exist_ok=True)
@@ -182,6 +184,8 @@ def main():
     parser.add_argument('--stream_dataset', default=False, action='store_true', help='Stream Dataset.')
     parser.add_argument('--fp16', default=False, action='store_true', help='FP16 Training.')
     parser.add_argument('--max_steps', type=int, default=-1, help='Number of train steps for streaming_datasets.')
+    parser.add_argument('--act_commitment_cost', type=float, default=1e-3, help='ACT Loss commitmemt cost.')
+    parser.add_argument('--gradient_checkpointing', default=False, action='store_true', help='Enable Gradient Chackpointing.')
 
 
     args = parser.parse_args()
@@ -194,6 +198,7 @@ def main():
         train(args.data_dir, args.log_dir, args.checkpoint_dir, args.dataset_name,
                 num_train_epochs=args.train_epochs, train_batch_size=args.train_batch_size, eval_batch_size=args.eval_batch_size,
                 gradient_accumulation_steps=args.gradient_accumulation_steps, parallelize=args.parallelize,
+                gradient_checkpointing=args.gradient_checkpointing, act_commitment_cost=args.act_commitment_cost,
                 model_config=args.model_config, pretrained_weights=None, checkpoint=args.checkpoint, verbose=args.verbose, stream_dataset=args.stream_dataset, fp16=args.fp16, max_steps=args.max_steps)
 
 if __name__ == "__main__":

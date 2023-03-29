@@ -26,8 +26,9 @@ _CONFIG_FOR_DOC = "GPT2ACTConfig"
 _TOKENIZER_FOR_DOC = "GPT2Tokenizer"
 
 class GPT2ACTConfig(GPT2Config):
-    def __init__(self, act_commitment_cost=1e-3, **kwargs):
+    def __init__(self, act_commitment_cost=1e-3, gradient_checkpointing=False, **kwargs):
         self.act_commitment_cost = act_commitment_cost
+        self.gradient_checkpointing = gradient_checkpointing
         super().__init__(**kwargs)
 
 class GPT2ACTPreTrainedModel(PreTrainedModel):
@@ -576,14 +577,16 @@ class GPT2ACTModel(GPT2ACTPreTrainedModel):
 
         if isinstance(config, GPT2ACTConfig):
             act_commitment_cost = config.act_commitment_cost
+            gradient_checkpointing = config.gradient_checkpointing
         else:
             act_commitment_cost = 1e-3
+            gradient_checkpointing = False
 
         self.wte = nn.Embedding(config.vocab_size, config.n_embd)  # Word Embedding 
         self.wpe = nn.Embedding(config.n_positions, config.n_embd) # Position Embedding
         self.drop = nn.Dropout(config.embd_pdrop)
         self.ln_f = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
-        self.act_f = ACTBlock(GPT2Block(config), config.n_layer, config.n_embd, act_commitment_cost=act_commitment_cost)
+        self.act_f = ACTBlock(GPT2Block(config), config.n_layer, config.n_embd, act_commitment_cost=act_commitment_cost, gradient_checkpointing=gradient_checkpointing)
         self.init_weights()
         # Model parallel
         self.model_parallel = False
