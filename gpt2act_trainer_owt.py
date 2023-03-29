@@ -90,6 +90,8 @@ def train(dataset_dir, base_logging_dir, checkpoint_dir, dataset_name,
         gradient_accumulation_steps=gradient_accumulation_steps,
         ignore_data_skip=True,
         fp16=True,
+        do_train=True,
+        do_eval=True,
     )
 
     if parallelize:

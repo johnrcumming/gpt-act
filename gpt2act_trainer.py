@@ -128,7 +128,9 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
         ignore_data_skip=True,
         fp16=fp16,
         max_steps=max_steps,
-        dataloader_pin_memory=True
+        dataloader_pin_memory=True,
+        do_train=True,
+        do_eval=True,
     )
 
     if parallelize:
