@@ -79,12 +79,6 @@ def preprocess_dataset(model_config, data_dir='data', cache_dir=None, dataset_na
 
         dataset.save_to_disk(dataset_dir)
 
-        try:
-            raw_dataset.cleanup_cache_files()
-            tok_dataset.cleanup_cache_files()
-            lm_dataset.cleanup_cache_files()
-        except:
-            pass
 
 def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
           num_train_epochs=5, train_batch_size=2, eval_batch_size=2, gradient_accumulation_steps=256, parallelize=False,
