@@ -98,7 +98,7 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
         val_dataset = dataset['validation'] if 'validation' in dataset else None
 
     else:
-        dataset = datasets.load_from_disk(data_dir, storage_options=storage_options)
+        dataset = datasets.DatasetDict.load_from_disk(data_dir)#, storage_options=storage_options)
         train_dataset = dataset['train']
         val_dataset = dataset['validation']
 
@@ -128,6 +128,7 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
         ignore_data_skip=True,
         fp16=fp16,
         max_steps=max_steps,
+        dataloader_pin_memory=True
     )
 
     if parallelize:
