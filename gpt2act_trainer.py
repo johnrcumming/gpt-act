@@ -12,7 +12,7 @@ from transformers import GPT2Config
 from transformers import GPT2Tokenizer
 from transformers import Trainer, TrainingArguments
 
-from gpt2_act import GPT2ACTLMHeadModel
+from gpt2_act import GPT2ACTLMHeadModel, GPT2ACTConfig
 
 def group_texts(block_size, tokenizer=None):
     def group_texts_fn(examples):
