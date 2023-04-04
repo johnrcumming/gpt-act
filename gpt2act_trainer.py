@@ -98,7 +98,8 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
         val_dataset = dataset['validation'] if 'validation' in dataset else None
 
     else:
-        dataset = datasets.DatasetDict.load_from_disk(data_dir)#, storage_options=storage_options)
+        dataset_dir=os.path.join(data_dir, dataset_name)
+        dataset = datasets.DatasetDict.load_from_disk(dataset_dir)#, storage_options=storage_options)
         train_dataset = dataset['train']
         val_dataset = dataset['validation']
 
