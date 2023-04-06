@@ -44,7 +44,7 @@ def load_streaming_dataset(model_config, data_dir='data', dataset_name='wikitext
     tokenizer = GPT2Tokenizer.from_pretrained(model_config)
     tokenizer.pad_token = tokenizer.eos_token
 
-    dataset = datasets.load_dataset(dataset_name, dataset_config, data_dir=dataset_dir, cache_dir=cache_dir, streaming=True)
+    dataset = datasets.load_dataset(dataset_name, dataset_config, data_dir=dataset_dir, cache_dir=cache_dir, streaming=True, num_proc=num_procs)
     dataset = dataset.map(lambda examples: tokenizer(examples["text"]), batched=True, remove_columns=["text"])
     dataset = dataset.map(group_texts(tokenizer.model_max_length), batched=True)
 
@@ -84,7 +84,7 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
           num_train_epochs=5, train_batch_size=2, eval_batch_size=2, gradient_accumulation_steps=256, parallelize=False,
           gradient_checkpointing=False, act_commitment_cost=1e-3,
           model_config='gpt2-xl', pretrained_weights=None, checkpoint=None, verbose=True, fp16=False, 
-          stream_dataset=False, max_steps=-1, storage_options=None):
+          stream_dataset=False, max_steps=-1, storage_options=None, num_procs=10):
     
     """Train a GPT2ACT model on a dataset."""
 
@@ -99,9 +99,11 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
 
     else:
         dataset_dir=os.path.join(data_dir, dataset_name)
-        dataset = datasets.DatasetDict.load_from_disk(dataset_dir)#, storage_options=storage_options)
+        dataset = datasets.DatasetDict.load_from_disk(dataset_dir)
         train_dataset = dataset['train']
         val_dataset = dataset['validation']
+        
+        
 
     gpt2_config = GPT2Config.from_pretrained(model_config)
     config = GPT2ACTConfig(act_commitment_cost=act_commitment_cost, gradient_checkpointing=gradient_checkpointing, **gpt2_config.to_dict())
@@ -123,15 +125,18 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
         save_total_limit=5,
         logging_steps=10,
         evaluation_strategy='steps',
-        eval_steps=500,
-        load_best_model_at_end=True,
+        eval_steps=1000,
+        save_strategy='steps',
+        save_steps=500,
         gradient_accumulation_steps=gradient_accumulation_steps,
+        eval_accumulation_steps=gradient_accumulation_steps,
         ignore_data_skip=True,
         fp16=fp16,
         max_steps=max_steps,
         dataloader_pin_memory=True,
         do_train=True,
         do_eval=True,
+        dataloader_num_workers=num_procs
     )
 
     if parallelize:
@@ -197,7 +202,8 @@ def main():
                 num_train_epochs=args.train_epochs, train_batch_size=args.train_batch_size, eval_batch_size=args.eval_batch_size,
                 gradient_accumulation_steps=args.gradient_accumulation_steps, parallelize=args.parallelize,
                 gradient_checkpointing=args.gradient_checkpointing, act_commitment_cost=args.act_commitment_cost,
-                model_config=args.model_config, pretrained_weights=None, checkpoint=args.checkpoint, verbose=args.verbose, stream_dataset=args.stream_dataset, fp16=args.fp16, max_steps=args.max_steps)
+                model_config=args.model_config, pretrained_weights=None, checkpoint=args.checkpoint, 
+                verbose=args.verbose, stream_dataset=args.stream_dataset, fp16=args.fp16, max_steps=args.max_steps, num_procs=args.num_procs)
 
 if __name__ == "__main__":
     main()
