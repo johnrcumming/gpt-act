@@ -31,7 +31,7 @@ RUN git config --global user.email "johnrcumming@gmail.com"
 
 RUN git clone git@github.com:johnrcumming/gpt-act.git
 
-RUN chmod +x /root/gpt-act/launch.sh
+RUN chmod +x gpt-act/launch.sh
 
 EXPOSE 8888
 EXPOSE 6006
