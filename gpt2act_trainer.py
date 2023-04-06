@@ -63,7 +63,7 @@ def preprocess_dataset(model_config, data_dir='data', cache_dir=None, dataset_na
         tokenizer = GPT2Tokenizer.from_pretrained(model_config)
         tokenizer.pad_token = tokenizer.eos_token
 
-        dataset = raw_dataset = datasets.load_dataset(dataset_name, dataset_config, data_dir=dataset_dir, cache_dir=cache_dir)
+        dataset = raw_dataset = datasets.load_dataset(dataset_name, dataset_config, data_dir=dataset_dir, cache_dir=cache_dir, num_proc=num_procs)
         dataset = tok_dataset = dataset.map(lambda examples: tokenizer(examples["text"]), num_proc=num_procs, batched=True, remove_columns=["text"])
         dataset = lm_dataset = tok_dataset.map(group_texts(tokenizer.model_max_length), num_proc=num_procs, batched=True)
 
