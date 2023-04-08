@@ -84,7 +84,8 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
           num_train_epochs=5, train_batch_size=2, eval_batch_size=2, gradient_accumulation_steps=256, parallelize=False,
           gradient_checkpointing=False, act_commitment_cost=1e-3,
           model_config='gpt2-xl', pretrained_weights=None, checkpoint=None, verbose=True, fp16=False, 
-          stream_dataset=False, max_steps=-1, storage_options=None, num_procs=10):
+          stream_dataset=False, max_steps=-1, storage_options=None, num_procs=10,
+          push_to_hub_model_id=None, push_to_hub_organization=None, push_to_hub_token=None):
     
     """Train a GPT2ACT model on a dataset."""
 
@@ -135,7 +136,10 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
         dataloader_pin_memory=True,
         do_train=True,
         do_eval=eval_batch_size > 0,
-        dataloader_num_workers=num_procs
+        dataloader_num_workers=num_procs,
+        push_to_hub_model_id=push_to_hub_model_id,
+        push_to_hub_organization=push_to_hub_organization,
+        push_to_hub_token=push_to_hub_token        
     )
 
     if parallelize:
@@ -189,6 +193,9 @@ def main():
     parser.add_argument('--act_commitment_cost', type=float, default=1e-3, help='ACT Loss commitmemt cost.')
     parser.add_argument('--gradient_checkpointing', default=False, action='store_true', help='Enable Gradient Chackpointing.')
 
+    parser.add_argument('--push_to_hub_model_id', type=str, default=None, help='The name of the repository to which push the Trainer.')
+    parser.add_argument('--push_to_hub_organization', type=str, default=None, help='The name of the organization in with to which push the Trainer.')
+    parser.add_argument('--push_to_hub_token', type=str, default=None, help=' The token to use to push the model to the Hub.')
 
     args = parser.parse_args()
 
@@ -202,7 +209,8 @@ def main():
                 gradient_accumulation_steps=args.gradient_accumulation_steps, parallelize=args.parallelize,
                 gradient_checkpointing=args.gradient_checkpointing, act_commitment_cost=args.act_commitment_cost,
                 model_config=args.model_config, pretrained_weights=None, checkpoint=args.checkpoint, 
-                verbose=args.verbose, stream_dataset=args.stream_dataset, fp16=args.fp16, max_steps=args.max_steps, num_procs=args.num_procs)
-
+                verbose=args.verbose, stream_dataset=args.stream_dataset, fp16=args.fp16, max_steps=args.max_steps, num_procs=args.num_procs,
+                push_to_hub_model_id=args.push_to_hub_model_id, push_to_hub_organization=args.push_to_hub_organization, push_to_hub_token=args.push_to_hub_token)
+        
 if __name__ == "__main__":
     main()
