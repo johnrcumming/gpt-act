@@ -119,13 +119,12 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
         overwrite_output_dir=True,
         num_train_epochs=num_train_epochs,              # total # of training epochs
         per_device_train_batch_size=train_batch_size,  # batch size per device during training
-        per_device_eval_batch_size=eval_batch_size,   # batch size for evaluation
+        per_device_eval_batch_size=eval_batch_size if eval_batch_size > 0 else None,   # batch size for evaluation
         warmup_steps=5000,                # number of warmup steps for learning rate scheduler
         weight_decay=0.01,               # strength of weight decay
         save_total_limit=5,
         logging_steps=10,
-        evaluation_strategy='steps',
-        eval_steps=1000,
+        evaluation_strategy='epoch' if eval_batch_size > 0 else 'no',
         save_strategy='steps',
         save_steps=500,
         gradient_accumulation_steps=gradient_accumulation_steps,
@@ -135,7 +134,7 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
         max_steps=max_steps,
         dataloader_pin_memory=True,
         do_train=True,
-        do_eval=True,
+        do_eval=eval_batch_size > 0,
         dataloader_num_workers=num_procs
     )
 
