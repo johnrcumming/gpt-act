@@ -44,7 +44,7 @@ def load_streaming_dataset(model_config, data_dir='data', dataset_name='wikitext
     tokenizer = GPT2Tokenizer.from_pretrained(model_config)
     tokenizer.pad_token = tokenizer.eos_token
 
-    dataset = datasets.load_dataset(dataset_name, dataset_config, data_dir=dataset_dir, cache_dir=cache_dir, streaming=True, num_proc=num_procs)
+    dataset = datasets.load_dataset(dataset_name, dataset_config, data_dir=dataset_dir, cache_dir=cache_dir, streaming=True)
     dataset = dataset.map(lambda examples: tokenizer(examples["text"]), batched=True, remove_columns=["text"])
     dataset = dataset.map(group_texts(tokenizer.model_max_length), batched=True)
 
