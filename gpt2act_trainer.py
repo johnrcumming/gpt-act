@@ -85,7 +85,8 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
           gradient_checkpointing=False, act_commitment_cost=1e-3,
           model_config='gpt2-xl', pretrained_weights=None, checkpoint=None, verbose=True, fp16=False, 
           stream_dataset=False, max_steps=-1, storage_options=None, num_procs=10,
-          push_to_hub_model_id=None, push_to_hub_organization=None, push_to_hub_token=None):
+          push_to_hub_model_id=None, push_to_hub_organization=None, push_to_hub_token=None
+          report_to="all", run_name=None):
     
     """Train a GPT2ACT model on a dataset."""
 
@@ -139,7 +140,9 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
         dataloader_num_workers=num_procs,
         push_to_hub_model_id=push_to_hub_model_id,
         push_to_hub_organization=push_to_hub_organization,
-        push_to_hub_token=push_to_hub_token        
+        push_to_hub_token=push_to_hub_token,
+        report_to=report_to,
+        run_name=run_name
     )
 
     if parallelize:
@@ -197,6 +200,9 @@ def main():
     parser.add_argument('--push_to_hub_organization', type=str, default=None, help='The name of the organization in with to which push the Trainer.')
     parser.add_argument('--push_to_hub_token', type=str, default=None, help=' The token to use to push the model to the Hub.')
 
+    parser.add_argument('--report_to', type=str, default="all", help='The list of integrations to report the results and logs to. Supported platforms are "azure_ml", "comet_ml", "mlflow", "tensorboard" and "wandb". Use "all" to report to all integrations installed, "none" for no integrations.')
+    parser.add_argument('--run_name', type=str, default=None, help='A descriptor for the run. Typically used for wandb logging.')
+
     args = parser.parse_args()
 
     if args.preprocess_dataset:
@@ -210,7 +216,9 @@ def main():
                 gradient_checkpointing=args.gradient_checkpointing, act_commitment_cost=args.act_commitment_cost,
                 model_config=args.model_config, pretrained_weights=None, checkpoint=args.checkpoint, 
                 verbose=args.verbose, stream_dataset=args.stream_dataset, fp16=args.fp16, max_steps=args.max_steps, num_procs=args.num_procs,
-                push_to_hub_model_id=args.push_to_hub_model_id, push_to_hub_organization=args.push_to_hub_organization, push_to_hub_token=args.push_to_hub_token)
+                push_to_hub_model_id=args.push_to_hub_model_id, push_to_hub_organization=args.push_to_hub_organization, push_to_hub_token=args.push_to_hub_token,
+                report_to=args.report_to, run_name=args.run_name
+             )
         
 if __name__ == "__main__":
     main()
