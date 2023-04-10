@@ -85,7 +85,7 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
           gradient_checkpointing=False, act_commitment_cost=1e-3,
           model_config='gpt2-xl', pretrained_weights=None, checkpoint=None, verbose=True, fp16=False, 
           stream_dataset=False, max_steps=-1, storage_options=None, num_procs=10,
-          push_to_hub_model_id=None, push_to_hub_organization=None, push_to_hub_token=None
+          push_to_hub_model_id=None, push_to_hub_organization=None, push_to_hub_token=None,
           report_to="all", run_name=None):
     
     """Train a GPT2ACT model on a dataset."""
@@ -142,7 +142,8 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
         push_to_hub_organization=push_to_hub_organization,
         push_to_hub_token=push_to_hub_token,
         report_to=report_to,
-        run_name=run_name
+        run_name=run_name,
+#        sharded_ddp='zero_dp_2 offload'
     )
 
     if parallelize:
