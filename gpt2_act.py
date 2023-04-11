@@ -138,16 +138,7 @@ class FCTBlock(nn.Module):
     def __init__(self, block, layers, hiddens, gradient_checkpointing=False, add_cross_attention=False, **kwargs):
         super().__init__()
 
-        if gradient_checkpointing:      
-            def create_custom_forward(module):
-                def custom_forward(*inputs):
-                    # checkpointing only works with tuple returns, not with lists
-                    return tuple(output for output in module(*inputs))
-                return custom_forward
-            self._block = create_custom_forward(block)
-        else:
-            self._block = block
-            
+        self._block = block    
         self._layers = layers
         self._hiddens = hiddens
         self._gradient_checkpointing = gradient_checkpointing
@@ -173,8 +164,22 @@ class FCTBlock(nn.Module):
             mask = head_mask[step] if head_mask is not None else None
             # apply layer fn to state and enc_hidden
             if self._gradient_checkpointing:
-                outputs = torch.utils.checkpoint.checkpoint(self._block, hidden_states, 
-                                                            layer_past=layer_past, head_mask=mask, use_cache=use_cache, output_attentions=output_attentions, **kwargs)
+                def create_custom_forward(module):
+                    def custom_forward(*inputs):
+                        # None for past_key_value
+                        return tuple(output for output in module(*inputs, use_cache, output_attentions))
+
+                    return custom_forward
+
+                outputs = torch.utils.checkpoint.checkpoint(
+                    create_custom_forward(self._block),
+                    hidden_states,
+                    None,
+                    kwargs['attention_mask'] if 'attention_mask' in kwargs else None,
+                    mask,
+                    kwargs['encoder_hidden_states'] if 'encoder_hidden_states' in kwargs else None,
+                    kwargs['encoder_attention_mask'] if 'encoder_attention_mask' in kwargs else None
+                )
             else:
                 outputs = self._block(hidden_states, layer_past=layer_past, head_mask=mask, use_cache=use_cache, output_attentions=output_attentions, **kwargs)
             
@@ -194,16 +199,7 @@ class ACTBlock(nn.Module):
     def __init__(self, block, layers, hiddens, initial_halting_bias=-1, act_commitment_cost=1e-3, layer_penalty=1e-3, epsilon=1e-2, gradient_checkpointing=False, add_cross_attention=False, halting_function_spec='l'):
         super().__init__()
 
-        if gradient_checkpointing:      
-            def create_custom_forward(module):
-                def custom_forward(*inputs):
-                    # checkpointing only works with tuple returns, not with lists
-                    return tuple(output for output in module(*inputs))
-                return custom_forward
-            self._block = create_custom_forward(block)
-        else:
-            self._block = block
-            
+        self._block = block
         self._layers = layers
         self._hiddens = hiddens
         self._threshold = 1 - epsilon
@@ -298,8 +294,22 @@ class ACTBlock(nn.Module):
             mask = head_mask[step] if head_mask is not None else None
             # apply layer fn to state and enc_hidden
             if self._gradient_checkpointing:
-                outputs = torch.utils.checkpoint.checkpoint(self._block, hidden_states, 
-                                                            layer_past=layer_past, head_mask=mask, use_cache=use_cache, output_attentions=output_attentions, **kwargs)
+                def create_custom_forward(module):
+                    def custom_forward(*inputs):
+                        # None for past_key_value
+                        return tuple(output for output in module(*inputs, use_cache, output_attentions))
+                    return custom_forward
+
+                outputs = torch.utils.checkpoint.checkpoint(
+                    create_custom_forward(self._block),
+                    hidden_states,
+                    None,
+                    kwargs['attention_mask'] if 'attention_mask' in kwargs else None,
+                    mask,
+                    kwargs['encoder_hidden_states'] if 'encoder_hidden_states' in kwargs else None,
+                    kwargs['encoder_attention_mask'] if 'encoder_attention_mask' in kwargs else None
+                )
+
             else:
                 outputs = self._block(hidden_states, layer_past=layer_past, head_mask=mask, use_cache=use_cache, output_attentions=output_attentions, **kwargs)
             

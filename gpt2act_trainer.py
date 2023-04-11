@@ -86,7 +86,7 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
           model_config='gpt2-xl', pretrained_weights=None, checkpoint=None, verbose=True, fp16=False, 
           stream_dataset=False, max_steps=-1, storage_options=None, num_procs=10,
           push_to_hub_model_id=None, push_to_hub_organization=None, push_to_hub_token=None,
-          report_to="all", run_name=None):
+          report_to="all", run_name=None, no_cuda=False):
     
     """Train a GPT2ACT model on a dataset."""
 
@@ -143,6 +143,7 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
         push_to_hub_token=push_to_hub_token,
         report_to=report_to,
         run_name=run_name,
+        no_cuda=no_cuda,
 #        sharded_ddp='zero_dp_2 offload'
     )
 
@@ -188,7 +189,7 @@ def main():
     parser.add_argument('--train_epochs', type=int, default=5, help='Training Epochs.')
     parser.add_argument('--train_batch_size', type=int, default=2, help='Training Batch Size.')
     parser.add_argument('--eval_batch_size', type=int, default=2, help='Evaluation Batch Size.')
-    parser.add_argument('--gradient_accumulation_steps', type=int, default=256, help='Gradient Accumulation Steps.')
+    parser.add_argument('--gradient_accumulation_steps', type=int, default=1, help='Gradient Accumulation Steps.')
     parser.add_argument('--parallelize', default=False, action='store_true', help='Parallelize Model - split model across GPUs.')
     parser.add_argument('--verbose', default=False, action='store_true', help='Verbose Logging.')
     parser.add_argument('--stream_dataset', default=False, action='store_true', help='Stream Dataset.')
@@ -196,6 +197,7 @@ def main():
     parser.add_argument('--max_steps', type=int, default=-1, help='Number of train steps for streaming_datasets.')
     parser.add_argument('--act_commitment_cost', type=float, default=1e-3, help='ACT Loss commitmemt cost.')
     parser.add_argument('--gradient_checkpointing', default=False, action='store_true', help='Enable Gradient Chackpointing.')
+    parser.add_argument('--no_cuda', default=False, action='store_true', help='Disable CUDA.')
 
     parser.add_argument('--push_to_hub_model_id', type=str, default=None, help='The name of the repository to which push the Trainer.')
     parser.add_argument('--push_to_hub_organization', type=str, default=None, help='The name of the organization in with to which push the Trainer.')
@@ -218,7 +220,8 @@ def main():
                 model_config=args.model_config, pretrained_weights=None, checkpoint=args.checkpoint, 
                 verbose=args.verbose, stream_dataset=args.stream_dataset, fp16=args.fp16, max_steps=args.max_steps, num_procs=args.num_procs,
                 push_to_hub_model_id=args.push_to_hub_model_id, push_to_hub_organization=args.push_to_hub_organization, push_to_hub_token=args.push_to_hub_token,
-                report_to=args.report_to, run_name=args.run_name
+                report_to=args.report_to, run_name=args.run_name,
+                no_cuda=args.no_cuda
              )
         
 if __name__ == "__main__":
