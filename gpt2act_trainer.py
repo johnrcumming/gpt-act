@@ -183,7 +183,8 @@ def main():
     parser.add_argument('--data_dir', type=str, default='data', help='Dataset Directory.')
     parser.add_argument('--log_dir', type=str, default='runs', help='Tensorboard Log Dir.')
     parser.add_argument('--checkpoint_dir', type=str, default='checkpoints', help='Ceckpoint Save Dir.')
-    parser.add_argument('--checkpoint', type=str, default=None, help='Ceckpoint to Continue From.')
+    parser.add_argument('--checkpoint', type=str, default=None, help='Checkpoint to Continue From.')
+    parser.add_argument('--pretrained_weights', type=str, default=None, help='Pretrained Weights to copy Embeddings and LMHead from.')
 
     parser.add_argument('--num_procs', type=int, default=10, help='Number of Processes for Dataset Processing.')
     parser.add_argument('--logging_steps', type=int, default=10, help='Log every n steps')
@@ -221,7 +222,7 @@ def main():
                 num_train_epochs=args.train_epochs, train_batch_size=args.train_batch_size, eval_batch_size=args.eval_batch_size,
                 gradient_accumulation_steps=args.gradient_accumulation_steps, parallelize=args.parallelize,
                 gradient_checkpointing=args.gradient_checkpointing, act_commitment_cost=args.act_commitment_cost,
-                model_config=args.model_config, pretrained_weights=None, checkpoint=args.checkpoint, 
+                model_config=args.model_config, pretrained_weights=args.pretrained_weights, checkpoint=args.checkpoint, 
                 verbose=args.verbose, stream_dataset=args.stream_dataset, fp16=args.fp16, max_steps=args.max_steps, num_procs=args.num_procs,
                 push_to_hub_model_id=args.push_to_hub_model_id, push_to_hub_organization=args.push_to_hub_organization, push_to_hub_token=args.push_to_hub_token,
                 report_to=args.report_to, run_name=args.run_name,
