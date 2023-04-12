@@ -86,7 +86,7 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
           model_config='gpt2-xl', pretrained_weights=None, checkpoint=None, verbose=True, fp16=False, 
           stream_dataset=False, max_steps=-1, storage_options=None, num_procs=10,
           push_to_hub_model_id=None, push_to_hub_organization=None, push_to_hub_token=None,
-          report_to="all", run_name=None, no_cuda=False):
+          report_to="all", run_name=None, no_cuda=False, logging_steps=10, save_steps=500, warmup_steps=5000):
     
     """Train a GPT2ACT model on a dataset."""
 
@@ -122,13 +122,13 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
         num_train_epochs=num_train_epochs,              # total # of training epochs
         per_device_train_batch_size=train_batch_size,  # batch size per device during training
         per_device_eval_batch_size=eval_batch_size if eval_batch_size > 0 else None,   # batch size for evaluation
-        warmup_steps=5000,                # number of warmup steps for learning rate scheduler
+        warmup_steps=warmup_steps,                # number of warmup steps for learning rate scheduler
         weight_decay=0.01,               # strength of weight decay
         save_total_limit=5,
-        logging_steps=10,
+        logging_steps=logging_steps,
         evaluation_strategy='epoch' if eval_batch_size > 0 else 'no',
         save_strategy='steps',
-        save_steps=500,
+        save_steps=save_steps,
         gradient_accumulation_steps=gradient_accumulation_steps,
         eval_accumulation_steps=gradient_accumulation_steps,
         ignore_data_skip=True,
@@ -186,6 +186,10 @@ def main():
     parser.add_argument('--checkpoint', type=str, default=None, help='Ceckpoint to Continue From.')
 
     parser.add_argument('--num_procs', type=int, default=10, help='Number of Processes for Dataset Processing.')
+    parser.add_argument('--logging_steps', type=int, default=10, help='Log every n steps')
+    parser.add_argument('--save_steps', type=int, default=10, help='Save checkpoint every n steps.')
+    parser.add_argument('--warmup_steps', type=int, default=5000, help='Optimizer Warmup steps.')
+
     parser.add_argument('--train_epochs', type=int, default=5, help='Training Epochs.')
     parser.add_argument('--train_batch_size', type=int, default=2, help='Training Batch Size.')
     parser.add_argument('--eval_batch_size', type=int, default=2, help='Evaluation Batch Size.')
@@ -221,7 +225,7 @@ def main():
                 verbose=args.verbose, stream_dataset=args.stream_dataset, fp16=args.fp16, max_steps=args.max_steps, num_procs=args.num_procs,
                 push_to_hub_model_id=args.push_to_hub_model_id, push_to_hub_organization=args.push_to_hub_organization, push_to_hub_token=args.push_to_hub_token,
                 report_to=args.report_to, run_name=args.run_name,
-                no_cuda=args.no_cuda
+                no_cuda=args.no_cuda, logging_steps=args.logging_steps, save_steps=args.save_steps,
              )
         
 if __name__ == "__main__":
