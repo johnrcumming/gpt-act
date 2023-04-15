@@ -8,6 +8,11 @@ WORKDIR /root
 RUN apt-get update
 
 RUN apt-get install -y wget bash openssh-server openssh-client git nvtop
+RUN apt-get install -y apt-transport-https ca-certificates gnupg
+
+RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] http://packages.cloud.google.com/apt cloud-sdk main" | tee -a /etc/apt/sources.list.d/google-cloud-sdk.list && curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key --keyring /usr/share/keyrings/cloud.google.gpg  add - && apt-get update -y && apt-get install google-cloud-cli -y
+            
+
 
 RUN wget \
     https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh \
@@ -19,6 +24,8 @@ RUN conda --version
 
 RUN conda install python=3.10 pytorch torchvision torchaudio pytorch-cuda=11.7 -c pytorch -c nvidia 
 RUN pip install jupyterlab transformers datasets tensorboard
+RUN pip install accelerate deepspeed fairscale wandb
+
 
 RUN mkdir /root/.ssh
 ADD id_rsa /root/.ssh/
