@@ -173,8 +173,7 @@ def calculate_perplexity(data_dir='data', dataset_name='wikitext', model_config=
     if verbose:
         transformers.utils.logging.set_verbosity_info()
 
-    torch_dtype = torch.float16 if fp16 else torch.float
-    model = GPT2ACTLMHeadModel.from_pretrained(checkpoint, torch_dtype=torch_dtype).to('cpu' if no_cuda else 'cuda')
+    model = GPT2ACTLMHeadModel.from_pretrained(checkpoint, torch_dtype=torch.float16 if fp16 else torch.float).to('cpu' if no_cuda else 'cuda')
 
     dataset_dir=os.path.join(data_dir, dataset_name)
     dataset = datasets.DatasetDict.load_from_disk(dataset_dir)
@@ -192,7 +191,7 @@ def calculate_perplexity(data_dir='data', dataset_name='wikitext', model_config=
         end_loc = min(begin_loc + max_length, seq_len)
         trg_len = end_loc - prev_end_loc  # may be different from stride on last loop
         e = torch.tensor(encodings['input_ids'])
-        input_ids = e[:, begin_loc:end_loc].to(dtype=torch_dtype, device='cpu' if no_cuda else 'cuda')
+        input_ids = e[:, begin_loc:end_loc].to(device='cpu' if no_cuda else 'cuda')
         target_ids = input_ids.clone()
         target_ids[:, :-trg_len] = -100
 
