@@ -169,12 +169,12 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
         traceback.print_exc()
         trainer.save_model(os.path.join(training_args.output_dir, 'crash'))
 
-def calculate_perplexity(data_dir='data', dataset_name='wikitext', model_config='gpt2', checkpoint=None, num_procs=4, verbose=True, no_cuda=True):
+def calculate_perplexity(data_dir='data', dataset_name='wikitext', model_config='gpt2', checkpoint=None, num_procs=4, verbose=True, no_cuda=True, fp16=True):
     if verbose:
         transformers.utils.logging.set_verbosity_info()
 
-
-    model = GPT2ACTLMHeadModel.from_pretrained(checkpoint, torch_dtype=torch.float16).to('cpu' if no_cuda else 'cuda')
+    torch_dtype = torch.float16 if fp16 else torch.float
+    model = GPT2ACTLMHeadModel.from_pretrained(checkpoint, torch_dtype=torch_dtype).to('cpu' if no_cuda else 'cuda')
 
     dataset_dir=os.path.join(data_dir, dataset_name)
     dataset = datasets.DatasetDict.load_from_disk(dataset_dir)
@@ -192,7 +192,7 @@ def calculate_perplexity(data_dir='data', dataset_name='wikitext', model_config=
         end_loc = min(begin_loc + max_length, seq_len)
         trg_len = end_loc - prev_end_loc  # may be different from stride on last loop
         e = torch.tensor(encodings['input_ids'])
-        input_ids = e[:, begin_loc:end_loc].to('cpu' if no_cuda else 'cuda')
+        input_ids = e[:, begin_loc:end_loc].to(dtype=torch_dtype, device='cpu' if no_cuda else 'cuda')
         target_ids = input_ids.clone()
         target_ids[:, :-trg_len] = -100
 
@@ -282,6 +282,6 @@ def main():
         
     if args.calculate_perplexity:
         calculate_perplexity(data_dir=args.data_dir, dataset_name=args.dataset_name, checkpoint=args.checkpoint, 
-                             num_procs=args.num_procs, verbose=args.verbose, no_cuda=args.no_cuda)
+                             num_procs=args.num_procs, verbose=args.verbose, no_cuda=args.no_cuda, fp16=args.fp16)
 if __name__ == "__main__":
     main()
