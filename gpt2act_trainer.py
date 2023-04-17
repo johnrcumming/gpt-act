@@ -180,23 +180,13 @@ def calculate_perplexity(data_dir='data', dataset_name='wikitext', model_config=
     encodings = dataset['test']
 
     max_length = model.config.n_positions
-    stride = 512
-    
-    seq_len = len(encodings['input_ids'][0])
-
-
     nlls = []
     prev_end_loc = 0
-    for begin_loc in tqdm(range(0, seq_len, stride)):
-        end_loc = min(begin_loc + max_length, seq_len)
-        trg_len = end_loc - prev_end_loc  # may be different from stride on last loop
-        e = torch.tensor(encodings['input_ids'])
-        input_ids = e[:, begin_loc:end_loc].to(device='cpu' if no_cuda else 'cuda')
-        target_ids = input_ids.clone()
-        target_ids[:, :-trg_len] = -100
 
-        print('input_ids', input_ids.shape, input_ids.device)
-        print('target_ids', target_ids.shape, target_ids.device)
+    for batch in tqdm(encodings):
+        input_ids = torch.tensor(batch['input_ids']).unsqueeze(0).to('cpu' if no_cuda else 'cuda')
+        target_ids = input_ids.clone()
+        target_ids[:, :-1] = -100
 
         with torch.no_grad():
             outputs = model(input_ids, labels=target_ids)
@@ -207,10 +197,6 @@ def calculate_perplexity(data_dir='data', dataset_name='wikitext', model_config=
             neg_log_likelihood = outputs.loss
 
         nlls.append(neg_log_likelihood)
-
-        prev_end_loc = end_loc
-        if end_loc == seq_len:
-            break
 
     ppl = torch.exp(torch.stack(nlls).mean())
 
