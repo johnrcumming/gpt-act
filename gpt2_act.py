@@ -1,4 +1,4 @@
-
+import math
 import torch
 import torch.nn as nn
 
@@ -55,6 +55,76 @@ class GPT2ACTPreTrainedModel(PreTrainedModel):
         elif isinstance(module, nn.LayerNorm):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
+
+class GPT2ACTLocalAttention(nn.Module):
+    def __init__(self, hidden_size, num_heads, local_window_size=None, dropout=0.1):
+        super().__init__()
+        self.hidden_size = hidden_size
+        self.num_heads = num_heads
+        self.local_window_size = local_window_size
+
+        self.query = nn.Linear(hidden_size, hidden_size)
+        self.key = nn.Linear(hidden_size, hidden_size)
+        self.value = nn.Linear(hidden_size, hidden_size)
+
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, hidden_states, attention_mask=None, head_mask=None):
+        q = self.query(hidden_states)
+        k = self.key(hidden_states)
+        v = self.value(hidden_states)
+
+        q = self._split_heads(q)
+        k = self._split_heads(k)
+        v = self._split_heads(v)
+
+        if self.local_window_size:
+            attn_scores = self._local_attention(q, k)
+        else:
+            attn_scores = torch.matmul(q, k.transpose(-1, -2))
+
+        attn_scores /= math.sqrt(self.hidden_size // self.num_heads)
+
+        if attention_mask is not None:
+            attn_scores = attn_scores + attention_mask
+
+        attn_probs = F.softmax(attn_scores, dim=-1)
+        attn_probs = self.dropout(attn_probs)
+
+        if head_mask is not None:
+            attn_probs = attn_probs * head_mask
+
+        attn_output = torch.matmul(attn_probs, v)
+        attn_output = self._merge_heads(attn_output)
+
+        return attn_output
+
+    def _split_heads(self, x):
+        batch_size, seq_length, hidden_size = x.size()
+        x = x.view(batch_size, seq_length, self.num_heads, -1)
+        return x.permute(0, 2, 1, 3)
+
+    def _merge_heads(self, x):
+        batch_size, num_heads, seq_length, head_size = x.size()
+        x = x.permute(0, 2, 1, 3).contiguous()
+        return x.view(batch_size, seq_length, self.hidden_size)
+
+    def _local_attention(self, q, k):
+        seq_length = q.size(-2)
+        local_window_size = min(self.local_window_size, seq_length)
+        attn_scores = []
+
+        for i in range(seq_length):
+            start = max(0, i - local_window_size + 1)
+            end = i + 1
+            local_k = k[:, :, start:end, :]
+            local_attn_scores = torch.matmul(q[:, :, i:i+1, :], local_k.transpose(-1, -2))
+            attn_scores.append(local_attn_scores)
+
+        return torch.cat(attn_scores, dim=-2)
+
+
+
 
 class ACTHaltingFunction(nn.Module):
     def __init__(self, hiddens, local_kernel_size=3, global_kernel_size=1, local_bias_init=-3.0, local_padding_size=1):
@@ -196,18 +266,23 @@ class FCTBlock(nn.Module):
 
 
 class ACTBlock(nn.Module):
-    def __init__(self, block, layers, hiddens, initial_halting_bias=-1, act_commitment_cost=1e-3, layer_penalty=1e-3, epsilon=1e-2, gradient_checkpointing=False, add_cross_attention=False, halting_function_spec='l'):
+    def __init__(self, block, layers, hiddens, initial_halting_bias=-1, act_commitment_cost=1e-3, layer_penalty=1e-3, epsilon=1e-2, 
+                 gradient_checkpointing=False, add_cross_attention=False, halting_function_spec='l', layerwise_attn=True):
         super().__init__()
 
         self._block = block
         self._layers = layers
         self._hiddens = hiddens
+        self._layerwise_attn = layerwise_attn
         self._threshold = 1 - epsilon
         self._act_commitment_cost = act_commitment_cost
         self._layer_penalty = layer_penalty # Tau - Graves 2016
         self._gradient_checkpointing = gradient_checkpointing
         self._add_cross_attention = add_cross_attention
         self._wle = nn.Embedding(layers, hiddens) # Layer Embedding
+
+        if self._layerwise_attn:
+            self._layer_attention_proj = nn.Linear(hiddens, hiddens)
 
         if halting_function_spec:
             self._Fhalting = self.make_halting_function(halting_function_spec, hiddens)  
@@ -251,6 +326,9 @@ class ACTBlock(nn.Module):
         all_cross_attentions = () if output_attentions and self._add_cross_attention else None
         all_hidden_states = () if output_hidden_states else None
         
+        if self._layerwise_attn:
+            layer_outputs = []
+
         while ((halting_probability<self._threshold) & (n_updates < self._layers)).byte().any():
 
             # Add layer signal
@@ -314,6 +392,10 @@ class ACTBlock(nn.Module):
                 outputs = self._block(hidden_states, layer_past=layer_past, head_mask=mask, use_cache=use_cache, output_attentions=output_attentions, **kwargs)
             
             hidden_states, present = outputs[:2]
+
+            if self._layerwise_attn:
+                layer_outputs.append(hidden_states)
+
             if use_cache is True:
                 presents = presents + (present,)
 
@@ -333,7 +415,16 @@ class ACTBlock(nn.Module):
         p_t_size = np.prod([p_t.shape[d] for d in p_t_dims])
         act_loss = self._act_commitment_cost * torch.sum(torch.sum(p_t,dim=p_t_dims)/p_t_size/p_t.shape[0])
 
-        return [previous_state, presents, all_hidden_states, all_self_attentions, all_cross_attentions, act_loss, ponder_cost]
+        stacked_outputs = torch.stack(layer_outputs, dim=2)  # Shape: [batch_size, seq_length, num_layers, hidden_size]
+
+        if self._layerwise_attn:
+            projected_input = self._layer_attention_proj(hidden_states)  # Shape: [batch_size, seq_length, hidden_size]
+            attention_scores = torch.einsum('bsh,bsth->bst', projected_input, stacked_outputs)  # Shape: [batch_size, seq_length, num_layers]
+            attention_probs = torch.softmax(attention_scores, dim=-1)  # Shape: [batch_size, seq_length, num_layers]
+            weighted_outputs = torch.einsum('bst,bsth->bsh', attention_probs, stacked_outputs)  # Shape: [batch_size, seq_length, hidden_size]
+            return [weighted_outputs, presents, all_hidden_states, all_self_attentions, all_cross_attentions, act_loss, ponder_cost]
+        else:
+            return [previous_state, presents, all_hidden_states, all_self_attentions, all_cross_attentions, act_loss, ponder_cost]
 
 
 @dataclass
