@@ -200,7 +200,7 @@ def calculate_perplexity(data_dir='data', dataset_name='wikitext', model_config=
 
     ppl = torch.exp(torch.stack(nlls).mean())
 
-    print('Perplexity:', ppl)
+    print('Perplexity:', float(ppl))
 
 
 def main():
