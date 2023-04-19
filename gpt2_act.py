@@ -267,7 +267,7 @@ class FCTBlock(nn.Module):
 
 class ACTBlock(nn.Module):
     def __init__(self, block, layers, hiddens, initial_halting_bias=-1, act_commitment_cost=1e-3, layer_penalty=1e-3, epsilon=1e-2, 
-                 gradient_checkpointing=False, add_cross_attention=False, halting_function_spec='l', layerwise_attn=True):
+                 gradient_checkpointing=False, add_cross_attention=False, halting_function_spec=None, layerwise_attn=True):
         super().__init__()
 
         self._block = block
@@ -284,7 +284,7 @@ class ACTBlock(nn.Module):
         if self._layerwise_attn:
             self._layer_attention_proj = nn.Linear(hiddens, hiddens)
 
-        if halting_function_spec:
+        if halting_function_spec is not None:
             self._Fhalting = self.make_halting_function(halting_function_spec, hiddens)  
             torch.nn.init .constant_(self._Fhalting[0].bias, initial_halting_bias)
         else:
