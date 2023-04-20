@@ -86,7 +86,8 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
           model_config='gpt2-xl', pretrained_weights=None, checkpoint=None, verbose=True, fp16=False, 
           stream_dataset=False, max_steps=-1, storage_options=None, num_procs=10,
           push_to_hub_model_id=None, push_to_hub_organization=None, push_to_hub_token=None,
-          report_to="all", run_name=None, no_cuda=False, logging_steps=10, save_steps=500, warmup_steps=5000, learning_rate=1e-5):
+          report_to="all", run_name=None, no_cuda=False, logging_steps=10, save_steps=500, warmup_steps=5000, learning_rate=1e-5,
+          deepspeed_config=None):
     
     """Train a GPT2ACT model on a dataset."""
 
@@ -145,6 +146,7 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
         run_name=run_name,
         no_cuda=no_cuda,
         learning_rate=learning_rate,
+        deepspeed=deepspeed_config,
     )
 
     if parallelize:
@@ -215,6 +217,7 @@ def main():
     parser.add_argument('--dataset_name', type=str, default="openwebtext", help='Huggingface Datasets Name.')
     parser.add_argument('--dataset_config', type=str, default=None, help='Huggingface Datasets Configuration Name.')
 
+    parser.add_argument('--deepspeed_config', type=str, default=None, help='Deepspeed JSON Config File.')
     parser.add_argument('--data_dir', type=str, default='data', help='Dataset Directory.')
     parser.add_argument('--log_dir', type=str, default='runs', help='Tensorboard Log Dir.')
     parser.add_argument('--checkpoint_dir', type=str, default='checkpoints', help='Ceckpoint Save Dir.')
@@ -262,7 +265,8 @@ def main():
                 verbose=args.verbose, stream_dataset=args.stream_dataset, fp16=args.fp16, max_steps=args.max_steps, num_procs=args.num_procs,
                 push_to_hub_model_id=args.push_to_hub_model_id, push_to_hub_organization=args.push_to_hub_organization, push_to_hub_token=args.push_to_hub_token,
                 report_to=args.report_to, run_name=args.run_name,
-                no_cuda=args.no_cuda, logging_steps=args.logging_steps, save_steps=args.save_steps, learning_rate=args.learning_rate
+                no_cuda=args.no_cuda, logging_steps=args.logging_steps, save_steps=args.save_steps, learning_rate=args.learning_rate,
+                warmup_steps=args.warmup_steps, deepspeed_config=args.deepspeed_config
              )
         
     if args.calculate_perplexity:
