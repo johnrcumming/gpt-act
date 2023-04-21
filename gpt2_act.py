@@ -408,7 +408,7 @@ class ACTBlock(nn.Module):
         super().__init__()
 
         if dynamic_stride is not None:
-            self._block = DynamicBlock(block, dynamic_stride)
+            self._block = DynamicBlock(block, layers=layers, stride=dynamic_stride)
         else:
             self._block = block
 
