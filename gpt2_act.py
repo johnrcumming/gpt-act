@@ -27,7 +27,7 @@ _TOKENIZER_FOR_DOC = "GPT2Tokenizer"
 
 class GPT2ACTConfig(GPT2Config):
     def __init__(self, act_commitment_cost=1e-3, gradient_checkpointing=False, halting_function_spec=None, layerwise_attn=True,
-                 local_window_size=None, use_relative_position=False, dynamic_stride=NOne, **kwargs):
+                 local_window_size=None, use_relative_position=False, dynamic_stride=None, **kwargs):
         """
         :class:`~transformers.GPT2ACTConfig` is the configuration class to store the configuration of a
         :class:`~transformers.GPT2ACTModel`.
