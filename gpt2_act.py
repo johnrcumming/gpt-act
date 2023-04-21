@@ -26,9 +26,30 @@ _CONFIG_FOR_DOC = "GPT2ACTConfig"
 _TOKENIZER_FOR_DOC = "GPT2Tokenizer"
 
 class GPT2ACTConfig(GPT2Config):
-    def __init__(self, act_commitment_cost=1e-3, gradient_checkpointing=False, **kwargs):
+    def __init__(self, act_commitment_cost=1e-3, gradient_checkpointing=False, halting_function_spec=None, layerwise_attn=True,
+                 local_window_size=None, use_relative_position=False, dynamic_stride=NOne, **kwargs):
+        """
+        :class:`~transformers.GPT2ACTConfig` is the configuration class to store the configuration of a
+        :class:`~transformers.GPT2ACTModel`.
+
+        Args:
+            act_commitment_cost (:obj:`float`, `optional`, defaults to 1e-3):   The cost of the commitment ACT loss.
+            gradient_checkpointing (:obj:`bool`, `optional`, defaults to :obj:`False`):   If :obj:`True`, use gradient checkpointing to save memory at the expense of slower backward pass.
+            halting_function_spec (:obj:`str`, `optional`, defaults to :obj:`None`):   The specification of the halting function. If :obj:`None`, the GPT2ACTHaltingFunction function is not used.
+            layerwise_attn (:obj:`bool`, `optional`, defaults to :obj:`True`):   If :obj:`True`, use layerwise attention.
+            local_window_size (:obj:`int`, `optional`, defaults to :obj:`None`):   The size of the local window. If :obj:`None`, the global attention is used.
+            use_relative_position (:obj:`bool`, `optional`, defaults to :obj:`False`):   If :obj:`True`, use relative position embedding.
+            dynamic_stride (:obj:`bool`, `optional`, defaults to :obj:`None`):   If :obj:`True`, use dynamic stride.
+            kwargs (:obj:`Dict[str, any]`):   Remaining dictionary of keyword arguments from GPT2Config. 
+        """
         self.act_commitment_cost = act_commitment_cost
         self.gradient_checkpointing = gradient_checkpointing
+        self.halting_function_spec = halting_function_spec
+        self.layerwise_attn = layerwise_attn
+        self.local_window_size = local_window_size
+        self.use_relative_position = use_relative_position
+        self.dynamic_stride = dynamic_stride
+
         super().__init__(**kwargs)
 
 class GPT2ACTPreTrainedModel(PreTrainedModel):
@@ -56,8 +77,45 @@ class GPT2ACTPreTrainedModel(PreTrainedModel):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
 
+class GPT2ACTRelativePositionEmbedding(nn.Module):
+    """
+    This module produces relative position embeddings given a position index tensor.
+    
+    Args:
+        max_position_embeddings (:obj:`int`):  The maximum value of the dimensionality of position embeddings, i.e. :obj:`max_position_embeddings` = :obj:`seq_length + 1`.
+        hidden_size (:obj:`int`):  The hidden size of the embeddings.
+    """
+    def __init__(self, max_position_embeddings, hidden_size):
+        super().__init__()
+        self._embedding = nn.Embedding(2 * max_position_embeddings - 1, hidden_size)
+
+    def forward(self, q, k):
+        """
+        Args:
+            q (:obj:`torch.Tensor`):  The query tensor of shape :obj:`(batch_size, num_heads, seq_length, dim_per_head)`.
+            k (:obj:`torch.Tensor`):  The key tensor of shape :obj:`(batch_size, num_heads, seq_length, dim_per_head)`.
+        Returns:
+            :obj:`torch.Tensor`:  The relative position embedding of shape :obj:`(batch_size, num_heads, seq_length, seq_length)`.
+        """
+        seq_length = q.size(-2)
+        positions = torch.arange(-seq_length + 1, seq_length, device=q.device).long()
+        relative_positions = self._embedding(positions)
+        relative_scores = torch.einsum('bhld,md->bhlm', q, relative_positions)
+        return relative_scores
+
 class GPT2ACTLocalAttention(nn.Module):
-    def __init__(self, hidden_size, num_heads, local_window_size=None, dropout=0.1):
+    """
+    This module implements local attention.
+    
+    Args:
+        hidden_size (:obj:`int`):  The hidden size of the attention.
+        num_heads (:obj:`int`):  The number of attention heads.
+        dropout (:obj:`float`, `optional`, defaults to 0.1):  The dropout probability.
+        local_window_size (:obj:`int`, `optional`, defaults to :obj:`None`):  The size of the local window. If :obj:`None`, the global attention is used.
+        use_relative_position (:obj:`bool`, `optional`, defaults to :obj:`False`):  If :obj:`True`, use relative position embedding.
+        
+    """
+    def __init__(self, hidden_size, num_heads, dropout=0.1, local_window_size=None, use_relative_position=False):
         super().__init__()
         self.hidden_size = hidden_size
         self.num_heads = num_heads
@@ -69,7 +127,20 @@ class GPT2ACTLocalAttention(nn.Module):
 
         self.dropout = nn.Dropout(dropout)
 
+        self.use_relative_position = use_relative_position
+        if use_relative_position:
+            self.relative_position_embedding = GPT2ACTRelativePositionEmbedding(2 * hidden_size - 1, hidden_size // num_heads)
+
+
     def forward(self, hidden_states, attention_mask=None, head_mask=None):
+        """
+        Args:
+            hidden_states (:obj:`torch.Tensor`):  The input tensor of shape :obj:`(batch_size, seq_length, hidden_size)`.
+            attention_mask (:obj:`torch.Tensor`):  The attention mask of shape :obj:`(batch_size, seq_length, seq_length)`.
+            head_mask (:obj:`torch.Tensor`):  The head mask of shape :obj:`(num_heads,)`.
+        Returns:
+            :obj:`torch.Tensor`:  The output tensor of shape :obj:`(batch_size, seq_length, hidden_size)`.
+        """
         q = self.query(hidden_states)
         k = self.key(hidden_states)
         v = self.value(hidden_states)
@@ -84,6 +155,9 @@ class GPT2ACTLocalAttention(nn.Module):
             attn_scores = torch.matmul(q, k.transpose(-1, -2))
 
         attn_scores /= math.sqrt(self.hidden_size // self.num_heads)
+
+        if self.use_relative_position:
+            attn_scores += self.relative_position_embedding(q, k)
 
         if attention_mask is not None:
             attn_scores = attn_scores + attention_mask
@@ -125,8 +199,17 @@ class GPT2ACTLocalAttention(nn.Module):
 
 
 
-
 class ACTHaltingFunction(nn.Module):
+    """
+    This module implements the ACT halting function as specified in the Universal Transformer.
+    
+    Args:
+        hiddens (:obj:`int`):  The hidden size of the attention.
+        local_kernel_size (:obj:`int`, `optional`, defaults to 3):  The kernel size of the local convolution.
+        global_kernel_size (:obj:`int`, `optional`, defaults to 1):  The kernel size of the global convolution.
+        local_bias_init (:obj:`float`, `optional`, defaults to -3.0):  The initial value of the local bias.
+        local_padding_size (:obj:`int`, `optional`, defaults to 1):  The padding size of the local convolution.
+    """
     def __init__(self, hiddens, local_kernel_size=3, global_kernel_size=1, local_bias_init=-3.0, local_padding_size=1):
         super().__init__()
 
@@ -158,6 +241,16 @@ class ACTHaltingFunction(nn.Module):
         return halting_prob
 
 class ACTLinearHaltingFunction(nn.Module):
+    """
+    This module implements the ACT halting function as specified by Graves et al. (2016).
+    
+    Args:
+        hiddens (:obj:`int`):  The hidden size of the attention.
+        local_kernel_size (:obj:`int`, `optional`, defaults to 3):  The kernel size of the local convolution.
+        global_kernel_size (:obj:`int`, `optional`, defaults to 1):  The kernel size of the global convolution.
+        local_bias_init (:obj:`float`, `optional`, defaults to -3.0):  The initial value of the local bias.
+        local_padding_size (:obj:`int`, `optional`, defaults to 1):  The padding size of the local convolution.
+    """
     def __init__(self, hiddens, global_kernel_size=1, local_kernel_size=3, local_bias_init=-3.0, local_padding_size=1):
         super().__init__()
 
@@ -264,16 +357,71 @@ class FCTBlock(nn.Module):
 
         return [hidden_states, presents, all_hidden_states, all_self_attentions, all_cross_attentions, 0.0, 0.0]
 
-
-class ACTBlock(nn.Module):
-    def __init__(self, block, layers, hiddens, initial_halting_bias=-1, act_commitment_cost=1e-3, layer_penalty=1e-3, epsilon=1e-2, 
-                 gradient_checkpointing=False, add_cross_attention=False, halting_function_spec=None, layerwise_attn=True):
+class DynamicBlock(nn.Module):
+    """"
+    Dynamic Block for ACTTransformer model
+    
+    Args:
+        block: Transformer block
+        stride: Stride
+    """
+    def __init__(self, block, stride=1):
         super().__init__()
 
-        self._block = block
+        self._stride = stride
+        self._block = block    
+        self._layers = nn.ModuleList()
+        
+    def forward(self, hidden_states, step=1, **kwargs):
+        """
+        Forward pass
+        
+        Args:
+            hidden_states: Hidden states
+            step: Step
+            kwargs: Additional arguments
+        """
+        if step % self._stride > len(self._layers):
+            self._layers.append(self._block.copy())
+
+        return self._layers[step % self._stride](hidden_states, **kwargs)
+
+class ACTBlock(nn.Module):
+    """
+    ACT Block for ACTTransformer model
+    
+    Args:
+        block: Transformer block
+        layers: Number of layers
+        hiddens: Hidden size
+        initial_halting_bias: Initial bias for halting probability
+        act_commitment_cost: ACT commitment cost
+        layer_penalty: Layer penalty
+        epsilon: Epsilon for halting probability
+        gradient_checkpointing: Use gradient checkpointing
+        add_cross_attention: Add cross attention
+        halting_function_spec: Halting function specification
+        layerwise_attn: Use layerwise attention
+        local_window_size: Local window size
+        use_relative_position: Use relative position encoding
+        dynamic_stride: Use dynamic stride   
+    """
+    def __init__(self, block, layers, hiddens, initial_halting_bias=-1, act_commitment_cost=1e-3, layer_penalty=1e-3, epsilon=1e-2, 
+                 gradient_checkpointing=False, add_cross_attention=False, halting_function_spec=None, layerwise_attn=True,
+                 local_window_size=None, use_relative_position=False, dynamic_stride=None):
+        super().__init__()
+
+        if dynamic_stride is not None:
+            self._block = DynamicBlock(block, dynamic_stride)
+        else:
+            self._block = block
+
         self._layers = layers
         self._hiddens = hiddens
         self._layerwise_attn = layerwise_attn
+        self._local_window_size=local_window_size
+        self._use_relative_position = use_relative_position
+
         self._threshold = 1 - epsilon
         self._act_commitment_cost = act_commitment_cost
         self._layer_penalty = layer_penalty # Tau - Graves 2016
@@ -289,6 +437,9 @@ class ACTBlock(nn.Module):
             torch.nn.init .constant_(self._Fhalting[0].bias, initial_halting_bias)
         else:
             self._Fhalting = ACTLinearHaltingFunction(hiddens)
+
+        if local_window_size:
+            block.attn = GPT2ACTLocalAttention(hiddens, block.attn.num_attention_heads, dropout=block.attn.attn_dropout.p, local_window_size=local_window_size, use_relative_position=use_relative_position)
 
     def make_halting_function(self, halting_function, hiddens):
         fhalting = []
@@ -389,7 +540,7 @@ class ACTBlock(nn.Module):
                 )
 
             else:
-                outputs = self._block(hidden_states, layer_past=layer_past, head_mask=mask, use_cache=use_cache, output_attentions=output_attentions, **kwargs)
+                outputs = self._block(hidden_states, layer_past=layer_past, head_mask=mask, use_cache=use_cache, output_attentions=output_attentions, step=step, **kwargs)
             
             hidden_states, present = outputs[:2]
 
@@ -687,7 +838,8 @@ class GPT2ACTModel(GPT2ACTPreTrainedModel):
         self.wpe = nn.Embedding(config.n_positions, config.n_embd) # Position Embedding
         self.drop = nn.Dropout(config.embd_pdrop)
         self.ln_f = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
-        self.act_f = ACTBlock(GPT2Block(config), config.n_layer, config.n_embd, act_commitment_cost=act_commitment_cost, gradient_checkpointing=gradient_checkpointing)
+        self.act_f = ACTBlock(GPT2Block(config), config.n_layer, config.n_embd, act_commitment_cost=act_commitment_cost, 
+                              gradient_checkpointing=gradient_checkpointing, dynamic_stride=config.dynamic_stride)
         self.init_weights()
         # Model parallel
         self.model_parallel = False

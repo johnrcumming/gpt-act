@@ -87,13 +87,11 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
           stream_dataset=False, max_steps=-1, storage_options=None, num_procs=10,
           push_to_hub_model_id=None, push_to_hub_organization=None, push_to_hub_token=None,
           report_to="all", run_name=None, no_cuda=False, logging_steps=10, save_steps=500, warmup_steps=5000, learning_rate=1e-5,
-          deepspeed_config=None):
-    
+          deepspeed_config=None):    
     """Train a GPT2ACT model on a dataset."""
 
     if verbose:
         transformers.utils.logging.set_verbosity_info()
-
 
     if stream_dataset:
         dataset = load_streaming_dataset(model_config, data_dir=data_dir, dataset_name=dataset_name)
@@ -106,8 +104,6 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
         train_dataset = dataset['train']
         val_dataset = dataset['validation']
         
-        
-
     gpt2_config = GPT2Config.from_pretrained(model_config)
     config = GPT2ACTConfig(act_commitment_cost=act_commitment_cost, gradient_checkpointing=gradient_checkpointing, **gpt2_config.to_dict())
     model = GPT2ACTLMHeadModel(config)
