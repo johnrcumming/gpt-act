@@ -1,6 +1,7 @@
 import math
 import torch
 import torch.nn as nn
+import copy
 
 import numpy as np
 
@@ -369,7 +370,7 @@ class DynamicBlock(nn.Module):
         super().__init__()
 
         self._stride = stride
-        self._layers = nn.ModuleList([block.copy() for _ in range(layers//stride)])
+        self._layers = nn.ModuleList([copy.deepcopy(block) for _ in range(layers//stride)])
         
     def forward(self, hidden_states, step=1, **kwargs):
         """
