@@ -365,12 +365,11 @@ class DynamicBlock(nn.Module):
         block: Transformer block
         stride: Stride
     """
-    def __init__(self, block, stride=1):
+    def __init__(self, block, layers=1, stride=1):
         super().__init__()
 
         self._stride = stride
-        self._block = block    
-        self._layers = nn.ModuleList()
+        self._layers = nn.ModuleList([block.copy() for _ in range(layers, stride)])
         
     def forward(self, hidden_states, step=1, **kwargs):
         """
@@ -381,9 +380,6 @@ class DynamicBlock(nn.Module):
             step: Step
             kwargs: Additional arguments
         """
-        if step % self._stride > len(self._layers):
-            self._layers.append(self._block.copy())
-
         return self._layers[step % self._stride](hidden_states, **kwargs)
 
 class ACTBlock(nn.Module):

@@ -87,7 +87,7 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
           stream_dataset=False, max_steps=-1, storage_options=None, num_procs=10,
           push_to_hub_model_id=None, push_to_hub_organization=None, push_to_hub_token=None,
           report_to="all", run_name=None, no_cuda=False, logging_steps=10, save_steps=500, warmup_steps=5000, learning_rate=1e-5,
-          deepspeed_config=None):    
+          deepspeed_config=None, dynamic_stride=None):    
     """Train a GPT2ACT model on a dataset."""
 
     if verbose:
@@ -105,7 +105,7 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
         val_dataset = dataset['validation']
         
     gpt2_config = GPT2Config.from_pretrained(model_config)
-    config = GPT2ACTConfig(act_commitment_cost=act_commitment_cost, gradient_checkpointing=gradient_checkpointing, **gpt2_config.to_dict())
+    config = GPT2ACTConfig(act_commitment_cost=act_commitment_cost, gradient_checkpointing=gradient_checkpointing, dynamic_stride=dynamic_stride, **gpt2_config.to_dict())
     model = GPT2ACTLMHeadModel(config)
 
     os.makedirs(base_logging_dir, exist_ok=True)
@@ -220,6 +220,8 @@ def main():
     parser.add_argument('--checkpoint', type=str, default=None, help='Checkpoint to Continue From.')
     parser.add_argument('--pretrained_weights', type=str, default=None, help='Pretrained Weights to copy Embeddings and LMHead from.')
 
+    parser.add_argument('--dynamic_stride', type=int, default=None, help='Dynamic Block Stride.')
+
     parser.add_argument('--num_procs', type=int, default=10, help='Number of Processes for Dataset Processing.')
     parser.add_argument('--logging_steps', type=int, default=10, help='Log every n steps')
     parser.add_argument('--save_steps', type=int, default=10, help='Save checkpoint every n steps.')
@@ -262,7 +264,7 @@ def main():
                 push_to_hub_model_id=args.push_to_hub_model_id, push_to_hub_organization=args.push_to_hub_organization, push_to_hub_token=args.push_to_hub_token,
                 report_to=args.report_to, run_name=args.run_name,
                 no_cuda=args.no_cuda, logging_steps=args.logging_steps, save_steps=args.save_steps, learning_rate=args.learning_rate,
-                warmup_steps=args.warmup_steps, deepspeed_config=args.deepspeed_config
+                warmup_steps=args.warmup_steps, deepspeed_config=args.deepspeed_config, dynamic_stride=args.dynamic_stride
              )
         
     if args.calculate_perplexity:
