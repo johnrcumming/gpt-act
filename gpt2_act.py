@@ -369,7 +369,7 @@ class DynamicBlock(nn.Module):
         super().__init__()
 
         self._stride = stride
-        self._layers = nn.ModuleList([block.copy() for _ in range(layers, stride)])
+        self._layers = nn.ModuleList([block.copy() for _ in range(layers//stride)])
         
     def forward(self, hidden_states, step=1, **kwargs):
         """
@@ -380,7 +380,7 @@ class DynamicBlock(nn.Module):
             step: Step
             kwargs: Additional arguments
         """
-        return self._layers[step % self._stride](hidden_states, **kwargs)
+        return self._layers[step // self._stride](hidden_states, **kwargs)
 
 class ACTBlock(nn.Module):
     """
