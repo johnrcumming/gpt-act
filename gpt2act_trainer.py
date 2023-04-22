@@ -84,7 +84,7 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
           num_train_epochs=5, train_batch_size=2, eval_batch_size=2, gradient_accumulation_steps=256, parallelize=False,
           gradient_checkpointing=False, act_commitment_cost=1e-3,
           model_config='gpt2-xl', checkpoint=None, verbose=True, fp16=False, 
-          pretrained=None, freeze_pretrained=False, lambda_kd=1e-4, temperature=4.0,
+          pretrained=None, freeze_pretrained=False, lambda_kd=1e-4, temperature_kd=4.0,
           stream_dataset=False, max_steps=-1, storage_options=None, num_procs=10,
           push_to_hub_model_id=None, push_to_hub_organization=None, push_to_hub_token=None,
           report_to="all", run_name=None, no_cuda=False, logging_steps=10, save_steps=500, warmup_steps=5000, learning_rate=1e-5,
@@ -111,7 +111,7 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
                            dynamic_stride=dynamic_stride,
                            pretrained=pretrained,
                            freeze_pretrained=freeze_pretrained, 
-                           lambda_kd=lambda_kd, temperature=temperature,
+                           lambda_kd=lambda_kd, temperature_kd=temperature_kd,
                            **gpt2_config.to_dict())
     if distill:
         model = GPT2ACTDistilation(config)
@@ -232,7 +232,7 @@ def main():
     parser.add_argument('--pretrained', type=str, default=None, help='Pretrained Weights to copy Embeddings and LMHead from.')
     parser.add_argument('--freeze_pretrained', type=False,  action='store_true', help='Freeze pretrained weights Training.')
     parser.add_argument('--lambda_kd', type=float, default=1e-4, help='Knowledge Distillation Loss Weight.')
-    parser.add_argument('--temperature', type=float, default=4.0, help='Knowledge Distillation Temperature.')
+    parser.add_argument('--temperature_kd', type=float, default=4.0, help='Knowledge Distillation temperature_kd.')
     parser.add_argument('--learning_rate', type=float, default=1e-4, help='Optimizer Learning Rate.')
 
     parser.add_argument('--dynamic_stride', type=int, default=None, help='Dynamic Block Stride.')
@@ -275,7 +275,7 @@ def main():
                 gradient_accumulation_steps=args.gradient_accumulation_steps, parallelize=args.parallelize,
                 gradient_checkpointing=args.gradient_checkpointing, act_commitment_cost=args.act_commitment_cost,
                 model_config=args.model_config, checkpoint=args.checkpoint, 
-                pretrained=args.pretrained, freeze_pretrained=args.freeze_pretrained, lambda_kd=args.lambda_kd, temperature=args.temperature,
+                pretrained=args.pretrained, freeze_pretrained=args.freeze_pretrained, lambda_kd=args.lambda_kd, temperature_kd=args.temperature_kd,
                 verbose=args.verbose, stream_dataset=args.stream_dataset, fp16=args.fp16, max_steps=args.max_steps, num_procs=args.num_procs,
                 push_to_hub_model_id=args.push_to_hub_model_id, push_to_hub_organization=args.push_to_hub_organization, push_to_hub_token=args.push_to_hub_token,
                 report_to=args.report_to, run_name=args.run_name,

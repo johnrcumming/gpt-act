@@ -29,7 +29,7 @@ _TOKENIZER_FOR_DOC = "GPT2Tokenizer"
 class GPT2ACTConfig(GPT2Config):
     def __init__(self, act_commitment_cost=1e-3, gradient_checkpointing=False, halting_function_spec=None, layerwise_attn=True,
                  local_window_size=None, use_relative_position=False, dynamic_stride=None, 
-                 pretrained='gpt2', lambda_kd=1e-4, temperature=4.0, freeze_pretrained=True, **kwargs):
+                 pretrained='gpt2', lambda_kd=1e-4, temperature_kd=4.0, freeze_pretrained=True, **kwargs):
         """
         :class:`~transformers.GPT2ACTConfig` is the configuration class to store the configuration of a
         :class:`~transformers.GPT2ACTModel`.
@@ -45,7 +45,7 @@ class GPT2ACTConfig(GPT2Config):
             pretrained (:obj:`str`, `optional`, defaults to :obj:`gpt2`):   The name of the pretrained model for distilation.
             freeze_pretrained (:obj:`bool`, `optional`, defaults to :obj:`True`):   Freeze the pretrained weights for lm_head and embeddings.
             lambda_kd (:obj:`float`, `optional`, defaults to 1e-4):   The weight of the distillation loss.
-            temperature (:obj:`float`, `optional`, defaults to 4.0):   The temperature for distillation.
+            temperature_kd (:obj:`float`, `optional`, defaults to 4.0):   The temperature_kd for distillation.
             kwargs (:obj:`Dict[str, any]`):   Remaining dictionary of keyword arguments from GPT2Config. 
         """
         self.act_commitment_cost = act_commitment_cost
@@ -58,7 +58,7 @@ class GPT2ACTConfig(GPT2Config):
         self.pretrained = pretrained
         self.freeze_pretrained = freeze_pretrained
         self.lambda_kd = lambda_kd
-        self.temperature = temperature
+        self.temperature_kd = temperature_kd
 
         super().__init__(**kwargs)
 
@@ -1237,7 +1237,7 @@ class GPT2ACTDistilation(GPT2ACTPreTrainedModel):
                 p.requires_grad = False
 
         self._lambda_kd = config.lambda_kd
-        self._temperature = config.temperature
+        self._temperature_kd = config.temperature_kd
 
         self.model_parallel = False
         self.device_map = None
@@ -1346,9 +1346,9 @@ class GPT2ACTDistilation(GPT2ACTPreTrainedModel):
             if self.model_parallel:
                 teacher_outputs.logits = teacher_outputs.logits.to(self.first_device)
 
-            kd_loss = torch.nn.functional.kl_div(torch.nn.functional.log_softmax(student_outputs.logits/self._temperature, dim=1),
-                                torch.nn.functional.softmax(teacher_outputs.logits/self._temperature, dim=1),
-                                reduction='batchmean') * self._temperature * self._temperature
+            kd_loss = torch.nn.functional.kl_div(torch.nn.functional.log_softmax(student_outputs.logits/self._temperature_kd, dim=1),
+                                torch.nn.functional.softmax(teacher_outputs.logits/self._temperature_kd, dim=1),
+                                reduction='batchmean') * self._temperature_kd * self._temperature_kd
             student_outputs.loss +=  kd_loss * self._lambda_kd
             return student_outputs
 
