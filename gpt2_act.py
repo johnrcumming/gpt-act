@@ -376,7 +376,10 @@ class FCTBlock(nn.Module):
                 def create_custom_forward(module):
                     def custom_forward(*inputs):
                         # None for past_key_value
-                        return tuple(output for output in module(*inputs, use_cache, output_attentions, step=step))
+                        if isinstance(module, DynamicBlock):
+                            return tuple(output for output in module(*inputs, use_cache, output_attentions))
+                        else:
+                            return tuple(output for output in module(*inputs, use_cache, output_attentions, step=step))
 
                     return custom_forward
 
@@ -390,7 +393,10 @@ class FCTBlock(nn.Module):
                     kwargs['encoder_attention_mask'] if 'encoder_attention_mask' in kwargs else None
                 )
             else:
-                outputs = self._block(hidden_states, layer_past=layer_past, head_mask=mask, use_cache=use_cache, output_attentions=output_attentions, step=step, **kwargs)
+                if isinstance(self._block, DynamicBlock):
+                    outputs = self._block(hidden_states, layer_past=layer_past, head_mask=mask, use_cache=use_cache, output_attentions=output_attentions, step=step, **kwargs)
+                else:
+                    outputs = self._block(hidden_states, layer_past=layer_past, head_mask=mask, use_cache=use_cache, output_attentions=output_attentions, **kwargs)
             
             hidden_states, present = outputs[:2]
             if use_cache is True:
@@ -545,7 +551,10 @@ class ACTBlock(nn.Module):
                 def create_custom_forward(module):
                     def custom_forward(*inputs):
                         # None for past_key_value
-                        return tuple(output for output in module(*inputs, use_cache, output_attentions, step=step))
+                        if isinstance(module, DynamicBlock):
+                            return tuple(output for output in module(*inputs, use_cache, output_attentions))
+                        else:
+                            return tuple(output for output in module(*inputs, use_cache, output_attentions, step=step))
                     return custom_forward
 
                 outputs = torch.utils.checkpoint.checkpoint(
@@ -560,8 +569,11 @@ class ACTBlock(nn.Module):
                 )
 
             else:
-                outputs = self._block(hidden_states, layer_past=layer_past, head_mask=mask, use_cache=use_cache, output_attentions=output_attentions, step=step, **kwargs)
-            
+                if isinstance(self._block, DynamicBlock):
+                    outputs = self._block(hidden_states, layer_past=layer_past, head_mask=mask, use_cache=use_cache, output_attentions=output_attentions, step=step, **kwargs)
+                else:
+                    outputs = self._block(hidden_states, layer_past=layer_past, head_mask=mask, use_cache=use_cache, output_attentions=output_attentions, **kwargs)
+
             hidden_states, present = outputs[:2]
 
             if self._layerwise_attn:
