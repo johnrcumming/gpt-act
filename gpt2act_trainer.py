@@ -12,7 +12,7 @@ from transformers import GPT2Config
 from transformers import GPT2Tokenizer, GPT2TokenizerFast
 from transformers import Trainer, TrainingArguments
 
-from gpt2_act import GPT2ACTLMHeadModel, GPT2ACTConfig
+from gpt2_act import GPT2ACTLMHeadModel, GPT2ACTConfig, GPT2ACTDistilation
 
 def group_texts(block_size, tokenizer=None):
     def group_texts_fn(examples):
@@ -83,11 +83,12 @@ def preprocess_dataset(model_config, data_dir='data', cache_dir=None, dataset_na
 def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
           num_train_epochs=5, train_batch_size=2, eval_batch_size=2, gradient_accumulation_steps=256, parallelize=False,
           gradient_checkpointing=False, act_commitment_cost=1e-3,
-          model_config='gpt2-xl', pretrained_weights=None, checkpoint=None, verbose=True, fp16=False, 
+          model_config='gpt2-xl', checkpoint=None, verbose=True, fp16=False, 
+          pretrained=None, freeze_pretrained=False, lambda_kd=1e-4, temperature=4.0,
           stream_dataset=False, max_steps=-1, storage_options=None, num_procs=10,
           push_to_hub_model_id=None, push_to_hub_organization=None, push_to_hub_token=None,
           report_to="all", run_name=None, no_cuda=False, logging_steps=10, save_steps=500, warmup_steps=5000, learning_rate=1e-5,
-          deepspeed_config=None, dynamic_stride=None):    
+          deepspeed_config=None, dynamic_stride=None, distill=False):    
     """Train a GPT2ACT model on a dataset."""
 
     if verbose:
@@ -105,8 +106,21 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
         val_dataset = dataset['validation']
         
     gpt2_config = GPT2Config.from_pretrained(model_config)
-    config = GPT2ACTConfig(act_commitment_cost=act_commitment_cost, gradient_checkpointing=gradient_checkpointing, dynamic_stride=dynamic_stride, **gpt2_config.to_dict())
-    model = GPT2ACTLMHeadModel(config)
+    config = GPT2ACTConfig(act_commitment_cost=act_commitment_cost,
+                           gradient_checkpointing=gradient_checkpointing,
+                           dynamic_stride=dynamic_stride,
+                           pretrained=pretrained,
+                           freeze_pretrained=freeze_pretrained, 
+                           lambda_kd=lambda_kd, temperature=temperature,
+                           **gpt2_config.to_dict())
+    if distill:
+        model = GPT2ACTDistilation(config)
+        model.parallelize()
+
+    else:
+        model = GPT2ACTLMHeadModel(config)
+        if pretrained is not None:
+            model.copyweights(pretrained, freeze_pretrained)
 
     os.makedirs(base_logging_dir, exist_ok=True)
     run_dir = dataset_name + str(len(os.listdir(base_logging_dir)))
@@ -148,9 +162,6 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
     if parallelize:
         model.parallelize()
     
-    if pretrained_weights is not None:
-        model.copyweights(pretrained_weights)
-
     trainer = Trainer(
         model=model,                         # the instantiated 🤗 Transformers model to be trained
         args=training_args,                  # training arguments, defined above
@@ -218,7 +229,11 @@ def main():
     parser.add_argument('--log_dir', type=str, default='runs', help='Tensorboard Log Dir.')
     parser.add_argument('--checkpoint_dir', type=str, default='checkpoints', help='Ceckpoint Save Dir.')
     parser.add_argument('--checkpoint', type=str, default=None, help='Checkpoint to Continue From.')
-    parser.add_argument('--pretrained_weights', type=str, default=None, help='Pretrained Weights to copy Embeddings and LMHead from.')
+    parser.add_argument('--pretrained', type=str, default=None, help='Pretrained Weights to copy Embeddings and LMHead from.')
+    parser.add_argument('--freeze_pretrained', type=False,  action='store_true', help='Freeze pretrained weights Training.')
+    parser.add_argument('--lambda_kd', type=float, default=1e-4, help='Knowledge Distillation Loss Weight.')
+    parser.add_argument('--temperature', type=float, default=4.0, help='Knowledge Distillation Temperature.')
+    parser.add_argument('--learning_rate', type=float, default=1e-4, help='Optimizer Learning Rate.')
 
     parser.add_argument('--dynamic_stride', type=int, default=None, help='Dynamic Block Stride.')
 
@@ -259,7 +274,8 @@ def main():
                 num_train_epochs=args.train_epochs, train_batch_size=args.train_batch_size, eval_batch_size=args.eval_batch_size,
                 gradient_accumulation_steps=args.gradient_accumulation_steps, parallelize=args.parallelize,
                 gradient_checkpointing=args.gradient_checkpointing, act_commitment_cost=args.act_commitment_cost,
-                model_config=args.model_config, pretrained_weights=args.pretrained_weights, checkpoint=args.checkpoint, 
+                model_config=args.model_config, checkpoint=args.checkpoint, 
+                pretrained=args.pretrained, freeze_pretrained=args.freeze_pretrained, lambda_kd=args.lambda_kd, temperature=args.temperature,
                 verbose=args.verbose, stream_dataset=args.stream_dataset, fp16=args.fp16, max_steps=args.max_steps, num_procs=args.num_procs,
                 push_to_hub_model_id=args.push_to_hub_model_id, push_to_hub_organization=args.push_to_hub_organization, push_to_hub_token=args.push_to_hub_token,
                 report_to=args.report_to, run_name=args.run_name,

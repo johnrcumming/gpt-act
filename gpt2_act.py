@@ -28,7 +28,8 @@ _TOKENIZER_FOR_DOC = "GPT2Tokenizer"
 
 class GPT2ACTConfig(GPT2Config):
     def __init__(self, act_commitment_cost=1e-3, gradient_checkpointing=False, halting_function_spec=None, layerwise_attn=True,
-                 local_window_size=None, use_relative_position=False, dynamic_stride=None, **kwargs):
+                 local_window_size=None, use_relative_position=False, dynamic_stride=None, 
+                 pretrained='gpt2', lambda_kd=1e-4, temperature=4.0, freeze_pretrained=True, **kwargs):
         """
         :class:`~transformers.GPT2ACTConfig` is the configuration class to store the configuration of a
         :class:`~transformers.GPT2ACTModel`.
@@ -41,6 +42,10 @@ class GPT2ACTConfig(GPT2Config):
             local_window_size (:obj:`int`, `optional`, defaults to :obj:`None`):   The size of the local window. If :obj:`None`, the global attention is used.
             use_relative_position (:obj:`bool`, `optional`, defaults to :obj:`False`):   If :obj:`True`, use relative position embedding.
             dynamic_stride (:obj:`bool`, `optional`, defaults to :obj:`None`):   If :obj:`True`, use dynamic stride.
+            pretrained (:obj:`str`, `optional`, defaults to :obj:`gpt2`):   The name of the pretrained model for distilation.
+            freeze_pretrained (:obj:`bool`, `optional`, defaults to :obj:`True`):   Freeze the pretrained weights for lm_head and embeddings.
+            lambda_kd (:obj:`float`, `optional`, defaults to 1e-4):   The weight of the distillation loss.
+            temperature (:obj:`float`, `optional`, defaults to 4.0):   The temperature for distillation.
             kwargs (:obj:`Dict[str, any]`):   Remaining dictionary of keyword arguments from GPT2Config. 
         """
         self.act_commitment_cost = act_commitment_cost
@@ -50,6 +55,10 @@ class GPT2ACTConfig(GPT2Config):
         self.local_window_size = local_window_size
         self.use_relative_position = use_relative_position
         self.dynamic_stride = dynamic_stride
+        self.pretrained = pretrained
+        self.freeze_pretrained = freeze_pretrained
+        self.lambda_kd = lambda_kd
+        self.temperature = temperature
 
         super().__init__(**kwargs)
 
@@ -297,67 +306,6 @@ class MoveChannels(nn.Module):
     def bias(self):
         return self._block.bias
         
-
-class FCTBlock(nn.Module):
-    def __init__(self, block, layers, hiddens, gradient_checkpointing=False, add_cross_attention=False, **kwargs):
-        super().__init__()
-
-        self._block = block    
-        self._layers = layers
-        self._hiddens = hiddens
-        self._gradient_checkpointing = gradient_checkpointing
-        self._add_cross_attention = add_cross_attention
-        self._wle = nn.Embedding(layers, hiddens) # Layer Embedding
-
-    def forward(self, hidden_states, head_mask=None, past_key_values=None, output_hidden_states=None, use_cache=None, output_attentions=None, **kwargs):
-        presents = () if use_cache else None
-        all_self_attentions = () if output_attentions else None
-        all_cross_attentions = () if output_attentions and self._add_cross_attention else None
-        all_hidden_states = () if output_hidden_states else None
-
-        for l in range(self._layers):
-            # Add layer embedding
-            s = torch.ones(hidden_states.shape[0:-1], dtype=torch.long, device=hidden_states.device) * step
-            hidden_states = hidden_states + self._wle(s)
-
-            layer_past=past_key_values[min(step, len(past_key_values)-1)] if past_key_values is not None else None
-
-            if layer_past is not None:
-                layer_past = tuple(past_state.to(hidden_states.device) for past_state in layer_past)
-
-            mask = head_mask[step] if head_mask is not None else None
-            # apply layer fn to state and enc_hidden
-            if self._gradient_checkpointing:
-                def create_custom_forward(module):
-                    def custom_forward(*inputs):
-                        # None for past_key_value
-                        return tuple(output for output in module(*inputs, use_cache, output_attentions))
-
-                    return custom_forward
-
-                outputs = torch.utils.checkpoint.checkpoint(
-                    create_custom_forward(self._block),
-                    hidden_states,
-                    None,
-                    kwargs['attention_mask'] if 'attention_mask' in kwargs else None,
-                    mask,
-                    kwargs['encoder_hidden_states'] if 'encoder_hidden_states' in kwargs else None,
-                    kwargs['encoder_attention_mask'] if 'encoder_attention_mask' in kwargs else None
-                )
-            else:
-                outputs = self._block(hidden_states, layer_past=layer_past, head_mask=mask, use_cache=use_cache, output_attentions=output_attentions, **kwargs)
-            
-            hidden_states, present = outputs[:2]
-            if use_cache is True:
-                presents = presents + (present,)
-
-            if output_attentions:
-                all_self_attentions = all_self_attentions + (outputs[2],)
-                if self._add_cross_attention:
-                    all_cross_attentions = all_cross_attentions + (outputs[3],)
-
-        return [hidden_states, presents, all_hidden_states, all_self_attentions, all_cross_attentions, 0.0, 0.0]
-
 class DynamicBlock(nn.Module):
     """"
     Dynamic Block for ACTTransformer model
@@ -382,6 +330,78 @@ class DynamicBlock(nn.Module):
             kwargs: Additional arguments
         """
         return self._layers[step // self._stride](hidden_states, **kwargs)
+
+
+class FCTBlock(nn.Module):
+    def __init__(self, block, layers, hiddens, gradient_checkpointing=False, add_cross_attention=False, 
+                 local_window_size=None, use_relative_position=False, dynamic_stride=None, **kwargs):
+        super().__init__()
+
+        self._layers = layers
+        self._hiddens = hiddens
+        self._gradient_checkpointing = gradient_checkpointing
+        self._add_cross_attention = add_cross_attention
+        self._use_relative_position = use_relative_position
+
+        self._wle = nn.Embedding(layers, hiddens) # Layer Embedding
+
+        if local_window_size:
+            block.attn = GPT2ACTLocalAttention(hiddens, block.attn.num_attention_heads, dropout=block.attn.attn_dropout.p, local_window_size=local_window_size, use_relative_position=use_relative_position)
+
+        if dynamic_stride is not None:
+            self._block = DynamicBlock(block, layers=layers, stride=dynamic_stride)
+        else:
+            self._block = block
+
+
+    def forward(self, hidden_states, head_mask=None, past_key_values=None, output_hidden_states=None, use_cache=None, output_attentions=None, **kwargs):
+        presents = () if use_cache else None
+        all_self_attentions = () if output_attentions else None
+        all_cross_attentions = () if output_attentions and self._add_cross_attention else None
+        all_hidden_states = () if output_hidden_states else None
+
+        for step in range(self._layers):
+            # Add layer embedding
+            s = torch.ones(hidden_states.shape[0:-1], dtype=torch.long, device=hidden_states.device) * step
+            hidden_states = hidden_states + self._wle(s)
+
+            layer_past=past_key_values[min(step, len(past_key_values)-1)] if past_key_values is not None else None
+
+            if layer_past is not None:
+                layer_past = tuple(past_state.to(hidden_states.device) for past_state in layer_past)
+
+            mask = head_mask[step] if head_mask is not None else None
+            # apply layer fn to state and enc_hidden
+            if self._gradient_checkpointing:
+                def create_custom_forward(module):
+                    def custom_forward(*inputs):
+                        # None for past_key_value
+                        return tuple(output for output in module(*inputs, use_cache, output_attentions, step=step))
+
+                    return custom_forward
+
+                outputs = torch.utils.checkpoint.checkpoint(
+                    create_custom_forward(self._block),
+                    hidden_states,
+                    None,
+                    kwargs['attention_mask'] if 'attention_mask' in kwargs else None,
+                    mask,
+                    kwargs['encoder_hidden_states'] if 'encoder_hidden_states' in kwargs else None,
+                    kwargs['encoder_attention_mask'] if 'encoder_attention_mask' in kwargs else None
+                )
+            else:
+                outputs = self._block(hidden_states, layer_past=layer_past, head_mask=mask, use_cache=use_cache, output_attentions=output_attentions, step=step, **kwargs)
+            
+            hidden_states, present = outputs[:2]
+            if use_cache is True:
+                presents = presents + (present,)
+
+            if output_attentions:
+                all_self_attentions = all_self_attentions + (outputs[2],)
+                if self._add_cross_attention:
+                    all_cross_attentions = all_cross_attentions + (outputs[3],)
+
+        return [hidden_states, presents, all_hidden_states, all_self_attentions, all_cross_attentions, 0.0, 0.0]
 
 class ACTBlock(nn.Module):
     """
@@ -408,11 +428,6 @@ class ACTBlock(nn.Module):
                  local_window_size=None, use_relative_position=False, dynamic_stride=None):
         super().__init__()
 
-        if dynamic_stride is not None:
-            self._block = DynamicBlock(block, layers=layers, stride=dynamic_stride)
-        else:
-            self._block = block
-
         self._layers = layers
         self._hiddens = hiddens
         self._layerwise_attn = layerwise_attn
@@ -438,6 +453,11 @@ class ACTBlock(nn.Module):
         if local_window_size:
             block.attn = GPT2ACTLocalAttention(hiddens, block.attn.num_attention_heads, dropout=block.attn.attn_dropout.p, local_window_size=local_window_size, use_relative_position=use_relative_position)
 
+        if dynamic_stride is not None:
+            self._block = DynamicBlock(block, layers=layers, stride=dynamic_stride)
+        else:
+            self._block = block
+
     def make_halting_function(self, halting_function, hiddens):
         fhalting = []
         kernel = ""
@@ -452,8 +472,10 @@ class ACTBlock(nn.Module):
                 fhalting.append(MoveChannels(nn.BatchNorm1d(hiddens), -1, 1))
             elif l.isdigit():
                 kernel = kernel + l
-                
-            fhalting.append(nn.ReLU())
+            elif l == 'r':   
+                fhalting.append(nn.ReLU())
+            elif l == 'a':
+                fhalting.append(GPT2ACTLocalAttention(hiddens, kernel))
         
         if halting_function[-1] == 'l':
             fhalting.append(nn.Linear(hiddens,1))    
@@ -523,7 +545,7 @@ class ACTBlock(nn.Module):
                 def create_custom_forward(module):
                     def custom_forward(*inputs):
                         # None for past_key_value
-                        return tuple(output for output in module(*inputs, use_cache, output_attentions))
+                        return tuple(output for output in module(*inputs, use_cache, output_attentions, step=step))
                     return custom_forward
 
                 outputs = torch.utils.checkpoint.checkpoint(
@@ -533,7 +555,8 @@ class ACTBlock(nn.Module):
                     kwargs['attention_mask'] if 'attention_mask' in kwargs else None,
                     mask,
                     kwargs['encoder_hidden_states'] if 'encoder_hidden_states' in kwargs else None,
-                    kwargs['encoder_attention_mask'] if 'encoder_attention_mask' in kwargs else None
+                    kwargs['encoder_attention_mask'] if 'encoder_attention_mask' in kwargs else None,
+                    
                 )
 
             else:
@@ -1048,6 +1071,8 @@ class GPT2ACTLMHeadModel(GPT2ACTPreTrainedModel):
         self.model_parallel = False
         self.device_map = False
 
+
+
     @add_start_docstrings(PARALLELIZE_DOCSTRING)
     def parallelize(self, device_map=None):
         self.transformer.parallelize(device_map)
@@ -1062,14 +1087,15 @@ class GPT2ACTLMHeadModel(GPT2ACTPreTrainedModel):
         self.model_parallel = False
         torch.cuda.empty_cache()
 
-    def copyweights(self, pretrained):
+    def copyweights(self, pretrained, freeze=False):
         model = GPT2LMHeadModel.from_pretrained(pretrained)
         self.lm_head.load_state_dict(model.lm_head.state_dict())
         self.transformer.wte.load_state_dict(model.transformer.wte.state_dict())
         self.transformer.wpe.load_state_dict(model.transformer.wpe.state_dict())
 
-        for p in [*self.lm_head.parameters(), *self.transformer.wte.parameters(), *self.transformer.wpe.parameters()]:
-            p.requires_grad = False
+        if freeze:
+            for p in [*self.lm_head.parameters(), *self.transformer.wte.parameters(), *self.transformer.wpe.parameters()]:
+                p.requires_grad = False
 
     def get_output_embeddings(self):
         return self.lm_head
@@ -1190,23 +1216,28 @@ class GPT2ACTLMHeadModel(GPT2ACTPreTrainedModel):
 
 
 class GPT2ACTDistilation(GPT2ACTPreTrainedModel):
-    def __init__(self, config, pretrained='gpt2-large', lambda_kd=1e-4, temperature=4.0, copyweights=False):
+    def __init__(self, config):
+
         super().__init__(config)
 
-        self.teacher = GPT2LMHeadModel.from_pretrained(pretrained)
+        self.teacher = GPT2LMHeadModel.from_pretrained(config.pretrained)
         self.student = GPT2ACTLMHeadModel(config)
 
         self.teacher.eval()
         for p in self.teacher.parameters():
             p.requires_grad = False
 
-        if copyweights:
-            self.student.lm_head.load_state_dict(self.teacher.lm_head.state_dict())
-            self.student.transformer.wte.load_state_dict(self.teacher.transformer.wte.state_dict())
-            self.student.transformer.wpe.load_state_dict(self.teacher.transformer.wpe.state_dict())
+        # initialize student with teacher's weights
+        self.student.lm_head.load_state_dict(self.teacher.lm_head.state_dict())
+        self.student.transformer.wte.load_state_dict(self.teacher.transformer.wte.state_dict())
+        self.student.transformer.wpe.load_state_dict(self.teacher.transformer.wpe.state_dict())
 
-        self._lambda_kd = lambda_kd
-        self._temperature = temperature
+        if config.freeze_pretrained:
+            for p in [*self.student.lm_head.parameters(), *self.student.transformer.wte.parameters(), *self.student.transformer.wpe.parameters()]:
+                p.requires_grad = False
+
+        self._lambda_kd = config.lambda_kd
+        self._temperature = config.temperature
 
         self.model_parallel = False
         self.device_map = None
