@@ -157,6 +157,7 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
         no_cuda=no_cuda,
         learning_rate=learning_rate,
         deepspeed=deepspeed_config,
+        max_grad_norm=1.0,
     )
 
     if parallelize:
