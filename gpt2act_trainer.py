@@ -84,7 +84,7 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
           num_train_epochs=5, train_batch_size=2, eval_batch_size=2, gradient_accumulation_steps=256, parallelize=False,
           gradient_checkpointing=False, act_commitment_cost=1e-3,
           model_config='gpt2-xl', checkpoint=None, verbose=True, fp16=False, 
-          pretrained=None, freeze_pretrained=False, lambda_kd=1e-4, temperature_kd=4.0,
+          pretrained=None, freeze_pretrained=False, lambda_kd=1e-4, temperature_kd=4.0, max_grad_norm=1.0,
           stream_dataset=False, max_steps=-1, storage_options=None, num_procs=10,
           push_to_hub_model_id=None, push_to_hub_organization=None, push_to_hub_token=None,
           report_to="all", run_name=None, no_cuda=False, logging_steps=10, save_steps=500, warmup_steps=5000, learning_rate=1e-5,
@@ -157,14 +157,16 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
         no_cuda=no_cuda,
         learning_rate=learning_rate,
         deepspeed=deepspeed_config,
-        max_grad_norm=1.0,
+        max_grad_norm=max_grad_norm,
+
     )
 
     if parallelize:
         model.parallelize()
     
     trainer = Trainer(
-        model=model,                         # the instantiated 🤗 Transformers model to be trained
+        model=model,        
+                                          # the instantiated 🤗 Transformers model to be trained
         args=training_args,                  # training arguments, defined above
         train_dataset=train_dataset,         # training dataset
         eval_dataset=val_dataset,            # evaluation dataset
@@ -235,6 +237,7 @@ def main():
     parser.add_argument('--lambda_kd', type=float, default=1e-4, help='Knowledge Distillation Loss Weight.')
     parser.add_argument('--temperature_kd', type=float, default=4.0, help='Knowledge Distillation temperature_kd.')
     parser.add_argument('--learning_rate', type=float, default=1e-4, help='Optimizer Learning Rate.')
+    parser.add_argument('--max_grad_norm', type=float, default=1.0, help='Gradient Clipping Max Grad Norm.')
 
     parser.add_argument('--dynamic_stride', type=int, default=None, help='Dynamic Block Stride.')
 
@@ -281,7 +284,8 @@ def main():
                 push_to_hub_model_id=args.push_to_hub_model_id, push_to_hub_organization=args.push_to_hub_organization, push_to_hub_token=args.push_to_hub_token,
                 report_to=args.report_to, run_name=args.run_name,
                 no_cuda=args.no_cuda, logging_steps=args.logging_steps, save_steps=args.save_steps, learning_rate=args.learning_rate,
-                warmup_steps=args.warmup_steps, deepspeed_config=args.deepspeed_config, dynamic_stride=args.dynamic_stride
+                warmup_steps=args.warmup_steps, deepspeed_config=args.deepspeed_config, dynamic_stride=args.dynamic_stride,
+                max_grad_norm=args.max_grad_norm
              )
         
     if args.calculate_perplexity:
