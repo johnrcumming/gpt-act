@@ -110,14 +110,15 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
                            gradient_checkpointing=gradient_checkpointing,
                            dynamic_stride=dynamic_stride,
                            lambda_kd=lambda_kd, temperature_kd=temperature_kd,
+                           teacher=model_config,
                            **gpt2_config.to_dict())
     if distill:
         model = GPT2ACTDistilation(config)
     else:
         model = GPT2ACTLMHeadModel(config)
 
-    if pretrained is not None:
-        model.copyweights(pretrained, freeze_pretrained)
+    if pretrained:
+        model.copyweights(model_config, freeze_pretrained)
 
     os.makedirs(base_logging_dir, exist_ok=True)
     run_dir = dataset_name + str(len(os.listdir(base_logging_dir)))
@@ -219,8 +220,8 @@ def main():
     parser.add_argument('--calculate_perplexity', default=False, action='store_true', help='Calculate Perplexity of Trained Model.')
 
 
-    parser.add_argument('--model_config', type=str, default="gpt2-xl", help='Huggingface Transformers Model Config.')
-    parser.add_argument('--dataset_name', type=str, default="openwebtext", help='Huggingface Datasets Name.')
+    parser.add_argument('--model_config', type=str, default="gpt2", help='Huggingface Transformers Model Config.')
+    parser.add_argument('--dataset_name', type=str, default="wikitext", help='Huggingface Datasets Name.')
     parser.add_argument('--dataset_config', type=str, default=None, help='Huggingface Datasets Configuration Name.')
 
     parser.add_argument('--deepspeed_config', type=str, default=None, help='Deepspeed JSON Config File.')
@@ -228,11 +229,11 @@ def main():
     parser.add_argument('--log_dir', type=str, default='runs', help='Tensorboard Log Dir.')
     parser.add_argument('--checkpoint_dir', type=str, default='checkpoints', help='Ceckpoint Save Dir.')
     parser.add_argument('--checkpoint', type=str, default=None, help='Checkpoint to Continue From.')
-    parser.add_argument('--pretrained', type=str, default=None, help='Pretrained Weights to copy weights from.')
-    parser.add_argument('--freeze_pretrained', type=False,  action='store_true', help='Freeze pretrained weights Training.')
+    parser.add_argument('--distill', default=False,  action='store_true', help='Distill Model from Pretrained.')
+    parser.add_argument('--pretrained', default=False,  action='store_true', help='Copy Weights from GPT2 model_config.')
+    parser.add_argument('--freeze_pretrained', default=False,  action='store_true', help='Freeze pretrained weights Training.')
     parser.add_argument('--lambda_kd', type=float, default=1e-4, help='Knowledge Distillation Loss Weight.')
     parser.add_argument('--temperature_kd', type=float, default=4.0, help='Knowledge Distillation temperature_kd.')
-    parser.add_argument('--learning_rate', type=float, default=1e-4, help='Optimizer Learning Rate.')
     parser.add_argument('--max_grad_norm', type=float, default=1.0, help='Gradient Clipping Max Grad Norm.')
 
     parser.add_argument('--dynamic_stride', type=int, default=None, help='Dynamic Block Stride.')
@@ -241,7 +242,7 @@ def main():
     parser.add_argument('--logging_steps', type=int, default=10, help='Log every n steps')
     parser.add_argument('--save_steps', type=int, default=10, help='Save checkpoint every n steps.')
     parser.add_argument('--warmup_steps', type=int, default=5000, help='Optimizer Warmup steps.')
-    parser.add_argument('--learning_rate', type=float, default=1e-5, help='Optimizer Learning Rate.')
+    parser.add_argument('--learning_rate', type=float, default=1e-4, help='Optimizer Learning Rate.')
 
     parser.add_argument('--train_epochs', type=int, default=5, help='Training Epochs.')
     parser.add_argument('--train_batch_size', type=int, default=2, help='Training Batch Size.')
@@ -281,7 +282,7 @@ def main():
                 report_to=args.report_to, run_name=args.run_name,
                 no_cuda=args.no_cuda, logging_steps=args.logging_steps, save_steps=args.save_steps, learning_rate=args.learning_rate,
                 warmup_steps=args.warmup_steps, deepspeed_config=args.deepspeed_config, dynamic_stride=args.dynamic_stride,
-                max_grad_norm=args.max_grad_norm
+                max_grad_norm=args.max_grad_norm, distill=args.distill
              )
         
     if args.calculate_perplexity:

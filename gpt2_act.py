@@ -29,7 +29,7 @@ _TOKENIZER_FOR_DOC = "GPT2Tokenizer"
 class GPT2ACTConfig(GPT2Config):
     def __init__(self, act_commitment_cost=1e-3, gradient_checkpointing=False, halting_function_spec=None, layerwise_attn=True,
                  local_window_size=None, use_relative_position=False, dynamic_stride=None, 
-                 pretrained='gpt2', lambda_kd=1e-4, temperature_kd=4.0, freeze_pretrained=True, **kwargs):
+                 teacher=None, lambda_kd=1e-4, temperature_kd=4.0, **kwargs):
         """
         :class:`~transformers.GPT2ACTConfig` is the configuration class to store the configuration of a
         :class:`~transformers.GPT2ACTModel`.
@@ -44,6 +44,7 @@ class GPT2ACTConfig(GPT2Config):
             dynamic_stride (:obj:`bool`, `optional`, defaults to :obj:`None`):   If :obj:`True`, use dynamic stride.
             lambda_kd (:obj:`float`, `optional`, defaults to 1e-4):   The weight of the distillation loss.
             temperature_kd (:obj:`float`, `optional`, defaults to 4.0):   The temperature_kd for distillation.
+            teacher (:obj:`GPT2LMHeadModel`, `optional`, defaults to :obj:`None`):   The teacher model for distillation.
             kwargs (:obj:`Dict[str, any]`):   Remaining dictionary of keyword arguments from GPT2Config. 
         """
         self.act_commitment_cost = act_commitment_cost
@@ -55,6 +56,7 @@ class GPT2ACTConfig(GPT2Config):
         self.dynamic_stride = dynamic_stride
         self.lambda_kd = lambda_kd
         self.temperature_kd = temperature_kd
+        self.teacher = teacher
 
         super().__init__(**kwargs)
 
@@ -1233,7 +1235,7 @@ class GPT2ACTDistilation(GPT2ACTPreTrainedModel):
 
         super().__init__(config)
 
-        self.teacher = GPT2LMHeadModel.from_pretrained(config.pretrained)
+        self.teacher = GPT2LMHeadModel.from_pretrained(config.teacher)
         self.student = GPT2ACTLMHeadModel(config)
 
         self.teacher.eval()
