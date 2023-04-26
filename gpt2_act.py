@@ -1099,14 +1099,19 @@ class GPT2ACTLMHeadModel(GPT2ACTPreTrainedModel):
         self.model_parallel = False
         torch.cuda.empty_cache()
 
-    def copyweights(self, pretrained, freeze=False):
-        model = GPT2LMHeadModel.from_pretrained(pretrained)
+    def copyweights(self, pretrained=None, model=None, freeze=False):
+        assert pretrained is not None or model is not None, "You must provide a pretrained model or a model to copy the weights from"
+
+        if model is None:
+            model = GPT2LMHeadModel.from_pretrained(pretrained)
+            
         self.lm_head.load_state_dict(model.lm_head.state_dict())
         self.transformer.wte.load_state_dict(model.transformer.wte.state_dict())
         self.transformer.wpe.load_state_dict(model.transformer.wpe.state_dict())
+        self.transformer.ln_f.load_state_dict(model.transformer.ln_f.state_dict())
 
         if freeze:
-            for p in [*self.lm_head.parameters(), *self.transformer.wte.parameters(), *self.transformer.wpe.parameters()]:
+            for p in [*self.lm_head.parameters(), *self.transformer.wte.parameters(), *self.transformer.wpe.parameters(), *self.transformer.ln_f.parameters()]:
                 p.requires_grad = False
 
     def get_output_embeddings(self):
@@ -1239,14 +1244,6 @@ class GPT2ACTDistilation(GPT2ACTPreTrainedModel):
         for p in self.teacher.parameters():
             p.requires_grad = False
 
-        # initialize student with teacher's weights
-        self.student.lm_head.load_state_dict(self.teacher.lm_head.state_dict())
-        self.student.transformer.wte.load_state_dict(self.teacher.transformer.wte.state_dict())
-        self.student.transformer.wpe.load_state_dict(self.teacher.transformer.wpe.state_dict())
-
-        if config.freeze_pretrained:
-            for p in [*self.student.lm_head.parameters(), *self.student.transformer.wte.parameters(), *self.student.transformer.wpe.parameters()]:
-                p.requires_grad = False
 
         self._lambda_kd = config.lambda_kd
         self._temperature_kd = config.temperature_kd
@@ -1282,6 +1279,12 @@ class GPT2ACTDistilation(GPT2ACTPreTrainedModel):
         self.teacher = self.teacher.to(self.last_device)
         self.model_parallel = False
         torch.cuda.empty_cache()
+
+    def copyweights(self, pretrained, freeze=False):
+        # initialize student with teacher's weights
+        self.student.copyweights(pretrained, model=self.teacher, freeze=freeze)
+        self.student.transformer.act_f._block.load_state_dict(self.teacher.transformer.h[0].state_dict())
+
 
     def to_device(self, device="cpu", **kwargs):
         if self.model_parallel:

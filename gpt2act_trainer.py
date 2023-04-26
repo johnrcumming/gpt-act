@@ -115,12 +115,11 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
                            **gpt2_config.to_dict())
     if distill:
         model = GPT2ACTDistilation(config)
-        model.parallelize()
-
     else:
         model = GPT2ACTLMHeadModel(config)
-        if pretrained is not None:
-            model.copyweights(pretrained, freeze_pretrained)
+
+    if pretrained is not None:
+        model.copyweights(pretrained, freeze_pretrained)
 
     os.makedirs(base_logging_dir, exist_ok=True)
     run_dir = dataset_name + str(len(os.listdir(base_logging_dir)))
@@ -165,8 +164,7 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
         model.parallelize()
     
     trainer = Trainer(
-        model=model,        
-                                          # the instantiated 🤗 Transformers model to be trained
+        model=model,                         # the instantiated 🤗 Transformers model to be trained
         args=training_args,                  # training arguments, defined above
         train_dataset=train_dataset,         # training dataset
         eval_dataset=val_dataset,            # evaluation dataset
@@ -232,7 +230,7 @@ def main():
     parser.add_argument('--log_dir', type=str, default='runs', help='Tensorboard Log Dir.')
     parser.add_argument('--checkpoint_dir', type=str, default='checkpoints', help='Ceckpoint Save Dir.')
     parser.add_argument('--checkpoint', type=str, default=None, help='Checkpoint to Continue From.')
-    parser.add_argument('--pretrained', type=str, default=None, help='Pretrained Weights to copy Embeddings and LMHead from.')
+    parser.add_argument('--pretrained', type=str, default=None, help='Pretrained Weights to copy weights from.')
     parser.add_argument('--freeze_pretrained', type=False,  action='store_true', help='Freeze pretrained weights Training.')
     parser.add_argument('--lambda_kd', type=float, default=1e-4, help='Knowledge Distillation Loss Weight.')
     parser.add_argument('--temperature_kd', type=float, default=4.0, help='Knowledge Distillation temperature_kd.')
