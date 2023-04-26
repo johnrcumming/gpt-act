@@ -42,8 +42,6 @@ class GPT2ACTConfig(GPT2Config):
             local_window_size (:obj:`int`, `optional`, defaults to :obj:`None`):   The size of the local window. If :obj:`None`, the global attention is used.
             use_relative_position (:obj:`bool`, `optional`, defaults to :obj:`False`):   If :obj:`True`, use relative position embedding.
             dynamic_stride (:obj:`bool`, `optional`, defaults to :obj:`None`):   If :obj:`True`, use dynamic stride.
-            pretrained (:obj:`str`, `optional`, defaults to :obj:`gpt2`):   The name of the pretrained model for distilation.
-            freeze_pretrained (:obj:`bool`, `optional`, defaults to :obj:`True`):   Freeze the pretrained weights for lm_head and embeddings.
             lambda_kd (:obj:`float`, `optional`, defaults to 1e-4):   The weight of the distillation loss.
             temperature_kd (:obj:`float`, `optional`, defaults to 4.0):   The temperature_kd for distillation.
             kwargs (:obj:`Dict[str, any]`):   Remaining dictionary of keyword arguments from GPT2Config. 
@@ -55,8 +53,6 @@ class GPT2ACTConfig(GPT2Config):
         self.local_window_size = local_window_size
         self.use_relative_position = use_relative_position
         self.dynamic_stride = dynamic_stride
-        self.pretrained = pretrained
-        self.freeze_pretrained = freeze_pretrained
         self.lambda_kd = lambda_kd
         self.temperature_kd = temperature_kd
 
@@ -1316,10 +1312,10 @@ class GPT2ACTDistilation(GPT2ACTPreTrainedModel):
             ``-100`` are ignored (masked), the loss is only computed for labels in ``[0, ..., config.vocab_size]``
         """
 
-        # print('teacher.device', self.teacher.device)
-        # print('student.device', self.student.device)
-        # print('input_ids.device', input_ids.device)
-        # print('labels.device', labels.device)
+        print('teacher.device', self.teacher.device)
+        print('student.device', self.student.device)
+        print('input_ids.device', input_ids.device)
+        print('labels.device', labels.device)
 
         if self.training:
             with torch.no_grad():
@@ -1339,6 +1335,7 @@ class GPT2ACTDistilation(GPT2ACTPreTrainedModel):
                     output_hidden_states=output_hidden_states,
                     return_dict=return_dict,
                 ))
+            print('teacher_outputs.loss', teacher_outputs.loss)
 
         student_outputs = self.student(**self.to_device(device=self.first_device,
             input_ids=input_ids,
@@ -1357,6 +1354,9 @@ class GPT2ACTDistilation(GPT2ACTPreTrainedModel):
             return_dict=return_dict,
         ))
 
+        print('student_outputs.loss', student_outputs.loss)
+    
+
         if self.training:
             if self.model_parallel:
                 teacher_outputs.logits = teacher_outputs.logits.to(self.first_device)
@@ -1364,6 +1364,7 @@ class GPT2ACTDistilation(GPT2ACTPreTrainedModel):
             kd_loss = torch.nn.functional.kl_div(torch.nn.functional.log_softmax(student_outputs.logits/self._temperature_kd, dim=1),
                                 torch.nn.functional.softmax(teacher_outputs.logits/self._temperature_kd, dim=1),
                                 reduction='batchmean') * self._temperature_kd * self._temperature_kd
+            print('kd_loss', kd_loss)
             student_outputs.loss +=  kd_loss * self._lambda_kd
             return student_outputs
 

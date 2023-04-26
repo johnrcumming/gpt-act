@@ -109,8 +109,6 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
     config = GPT2ACTConfig(act_commitment_cost=act_commitment_cost,
                            gradient_checkpointing=gradient_checkpointing,
                            dynamic_stride=dynamic_stride,
-                           pretrained=pretrained,
-                           freeze_pretrained=freeze_pretrained, 
                            lambda_kd=lambda_kd, temperature_kd=temperature_kd,
                            **gpt2_config.to_dict())
     if distill:
