@@ -1314,10 +1314,10 @@ class GPT2ACTDistilation(GPT2ACTPreTrainedModel):
             ``-100`` are ignored (masked), the loss is only computed for labels in ``[0, ..., config.vocab_size]``
         """
 
-        print('teacher.device', self.teacher.device)
-        print('student.device', self.student.device)
-        print('input_ids.device', input_ids.device)
-        print('labels.device', labels.device)
+        # print('teacher.device', self.teacher.device)
+        # print('student.device', self.student.device)
+        # print('input_ids.device', input_ids.device)
+        # print('labels.device', labels.device)
 
         if self.training:
             with torch.no_grad():
@@ -1337,7 +1337,7 @@ class GPT2ACTDistilation(GPT2ACTPreTrainedModel):
                     output_hidden_states=output_hidden_states,
                     return_dict=return_dict,
                 ))
-            print('teacher_outputs.loss', teacher_outputs.loss)
+            #print('teacher_outputs.loss', teacher_outputs.loss)
 
         student_outputs = self.student(**self.to_device(device=self.first_device,
             input_ids=input_ids,
@@ -1356,19 +1356,21 @@ class GPT2ACTDistilation(GPT2ACTPreTrainedModel):
             return_dict=return_dict,
         ))
 
-        print('student_outputs.loss', student_outputs.loss)
-    
-
         if self.training:
             if self.model_parallel:
                 teacher_outputs.logits = teacher_outputs.logits.to(self.first_device)
 
             kd_loss = torch.nn.functional.kl_div(torch.nn.functional.log_softmax(student_outputs.logits/self._temperature_kd, dim=1),
                                 torch.nn.functional.softmax(teacher_outputs.logits/self._temperature_kd, dim=1),
-                                reduction='batchmean') * self._temperature_kd * self._temperature_kd
-            print('kd_loss', kd_loss)
-            student_outputs.loss +=  kd_loss * self._lambda_kd
+                                reduction='batchmean') * self._lambda_kd
+
+            
+            print('train: kd_loss', kd_loss)
+            student_outputs.loss = student_outputs.loss + kd_loss
+            print('train: student_outputs.loss', student_outputs.loss)
+
             return student_outputs
 
         else:
+            print('validate: student_outputs.loss', student_outputs.loss)
             return student_outputs
