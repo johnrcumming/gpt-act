@@ -1362,9 +1362,8 @@ class GPT2ACTDistilation(GPT2ACTPreTrainedModel):
 
             kd_loss = torch.nn.functional.kl_div(torch.nn.functional.log_softmax(student_outputs.logits/self._temperature_kd, dim=1),
                                 torch.nn.functional.softmax(teacher_outputs.logits/self._temperature_kd, dim=1),
-                                reduction='batchmean') * self._lambda_kd
+                                reduction='batchmean') * self._temperature_kd**2 * self._lambda_kd
 
-            
             print('train: kd_loss', kd_loss)
             student_outputs.loss = student_outputs.loss + kd_loss
             print('train: student_outputs.loss', student_outputs.loss)
