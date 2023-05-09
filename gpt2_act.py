@@ -503,7 +503,7 @@ class ACTBlock(nn.Module):
         if self._layerwise_attn:
             layer_outputs = []
 
-        while ((halting_probability<self._threshold) & (n_updates < self._layers)).byte().any():
+        while ((halting_probability<self._threshold) & (n_updates < self._layers)).bool().any():
 
             # Add layer signal
             s = torch.ones(hidden_states.shape[0:-1], dtype=torch.long, device=hidden_states.device) * step
@@ -1226,8 +1226,6 @@ class GPT2ACTLMHeadModel(GPT2ACTPreTrainedModel):
             ponder_cost=transformer_outputs.ponder_cost,    
             fct_loss=loss_fct      
         )
-
-
 
 
 class GPT2ACTDistilation(GPT2ACTPreTrainedModel):

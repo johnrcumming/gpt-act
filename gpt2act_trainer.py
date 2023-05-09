@@ -7,6 +7,7 @@ from tqdm import tqdm
 
 import transformers
 import datasets
+import wandb
 
 from transformers import GPT2Config
 from transformers import GPT2Tokenizer, GPT2TokenizerFast
@@ -90,6 +91,8 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
           report_to="all", run_name=None, no_cuda=False, logging_steps=10, save_steps=500, warmup_steps=5000, learning_rate=1e-5,
           deepspeed_config=None, dynamic_stride=None, distill=False):    
     """Train a GPT2ACT model on a dataset."""
+
+    wandb.init(project='gpt2act')
 
     if verbose:
         transformers.utils.logging.set_verbosity_info()
