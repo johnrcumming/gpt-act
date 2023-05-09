@@ -92,7 +92,7 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
           deepspeed_config=None, dynamic_stride=None, distill=False):    
     """Train a GPT2ACT model on a dataset."""
 
-    wandb.init(project='gpt2act')
+    wandb.init(project='gpt2act', name=run_name)
 
     if verbose:
         transformers.utils.logging.set_verbosity_info()
@@ -235,15 +235,15 @@ def main():
     parser.add_argument('--distill', default=False,  action='store_true', help='Distill Model from Pretrained.')
     parser.add_argument('--pretrained', default=False,  action='store_true', help='Copy Weights from GPT2 model_config.')
     parser.add_argument('--freeze_pretrained', default=False,  action='store_true', help='Freeze pretrained weights Training.')
-    parser.add_argument('--lambda_kd', type=float, default=1e-4, help='Knowledge Distillation Loss Weight.')
+    parser.add_argument('--lambda_kd', type=float, default=1e-6, help='Knowledge Distillation Loss Weight.')
     parser.add_argument('--temperature_kd', type=float, default=4.0, help='Knowledge Distillation temperature_kd.')
     parser.add_argument('--max_grad_norm', type=float, default=1.0, help='Gradient Clipping Max Grad Norm.')
 
     parser.add_argument('--dynamic_stride', type=int, default=None, help='Dynamic Block Stride.')
 
-    parser.add_argument('--num_procs', type=int, default=10, help='Number of Processes for Dataset Processing.')
+    parser.add_argument('--num_procs', type=int, default=2, help='Number of Processes for Dataset Processing.')
     parser.add_argument('--logging_steps', type=int, default=10, help='Log every n steps')
-    parser.add_argument('--save_steps', type=int, default=10, help='Save checkpoint every n steps.')
+    parser.add_argument('--save_steps', type=int, default=50, help='Save checkpoint every n steps.')
     parser.add_argument('--warmup_steps', type=int, default=5000, help='Optimizer Warmup steps.')
     parser.add_argument('--learning_rate', type=float, default=1e-4, help='Optimizer Learning Rate.')
 
