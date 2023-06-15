@@ -1,8 +1,19 @@
-import torch
-import torch.nn as nn
+# gpt2_twp.py
+# Distilation of Transformers using transformer weight prediction
+# 
+# This class can be atapted to any transformer model by replacing the sequential blocks
+# with an Adaptive Computtion Time Block tat predicts weights for each layer of the transformer using another
+# ACT transformer model.
+#
+
+import math
+import copy
 
 from typing import List, Optional, Tuple
 from dataclasses import dataclass
+
+import torch
+import torch.nn as nn
 
 from transformers.models.gpt2.modeling_gpt2 import GPT2Block
 from transformers.models.gpt2.configuration_gpt2 import GPT2Config
@@ -17,19 +28,19 @@ from transformers.modeling_outputs import ModelOutput
 from transformers import GPT2LMHeadModel
 
 from act import ACTModelOutputWithPastAndCrossAttentions, ACTCausalLMOutputWithPastAndCrossAttentions, ACTBlock
+from twp import TWPBlock
 
-
-_CHECKPOINT_FOR_DOC = "gpt2act"
-_CONFIG_FOR_DOC = "GPT2ACTConfig"
+_CHECKPOINT_FOR_DOC = "gpt2twp"
+_CONFIG_FOR_DOC = "GPT2TWPConfig"
 _TOKENIZER_FOR_DOC = "GPT2Tokenizer"
 
-class GPT2ACTConfig(GPT2Config):
+class GPT2TWPConfig(GPT2Config):
     def __init__(self, act_commitment_cost=1e-3, gradient_checkpointing=False, halting_function_spec=None, layerwise_attn=True,
                  local_window_size=None, use_relative_position=False, dynamic_stride=None, 
                  teacher=None, lambda_kd=1e-4, temperature_kd=4.0, **kwargs):
         """
-        :class:`~transformers.GPT2ACTConfig` is the configuration class to store the configuration of a
-        :class:`~transformers.GPT2ACTModel`.
+        :class:`~transformers.GPT2TWPConfig` is the configuration class to store the configuration of a
+        :class:`~transformers.GPT2TWPModel`.
 
         Args:
             act_commitment_cost (:obj:`float`, `optional`, defaults to 1e-3):   The cost of the commitment ACT loss.
@@ -57,13 +68,13 @@ class GPT2ACTConfig(GPT2Config):
 
         super().__init__(**kwargs)
 
-class GPT2ACTPreTrainedModel(PreTrainedModel):
+class GPT2TWPPreTrainedModel(PreTrainedModel):
     """
     An abstract class to handle weights initialization and a simple interface for downloading and loading pretrained
     models.
     """
 
-    config_class = GPT2ACTConfig
+    config_class = GPT2TWPConfig
     base_model_prefix = "transformer"
     is_parallelizable = True
 
@@ -83,7 +94,7 @@ class GPT2ACTPreTrainedModel(PreTrainedModel):
             module.weight.data.fill_(1.0)
 
 
-GPT2_START_DOCSTRING = r"""
+GPT2TWP_START_DOCSTRING = r"""
 
     This model inherits from [`PreTrainedModel`]. Check the superclass documentation for the generic methods the
     library implements for all its model (such as downloading or saving, resizing the input embeddings, pruning heads
@@ -99,7 +110,7 @@ GPT2_START_DOCSTRING = r"""
             configuration. Check out the [`~PreTrainedModel.from_pretrained`] method to load the model weights.
 """
 
-GPT2_INPUTS_DOCSTRING = r"""
+GPT2TWP_INPUTS_DOCSTRING = r"""
 
     Args:
         input_ids (`torch.LongTensor` of shape `(batch_size, input_ids_length)`):
@@ -223,13 +234,13 @@ DEPARALLELIZE_DOCSTRING = r"""
 
 @add_start_docstrings(
     "The bare GPT2-ACT Model transformer outputting raw hidden-states without any specific head on top.",
-    GPT2_START_DOCSTRING,
+    GPT2TWP_START_DOCSTRING,
 )        
-class GPT2ACTModel(GPT2ACTPreTrainedModel):
+class GPT2TWPModel(GPT2TWPPreTrainedModel):
     def __init__(self, config):
         super().__init__(config)
 
-        if isinstance(config, GPT2ACTConfig):
+        if isinstance(config, GPT2TWPConfig):
             act_commitment_cost = config.act_commitment_cost
             gradient_checkpointing = config.gradient_checkpointing
         else:
@@ -240,7 +251,7 @@ class GPT2ACTModel(GPT2ACTPreTrainedModel):
         self.wpe = nn.Embedding(config.n_positions, config.n_embd) # Position Embedding
         self.drop = nn.Dropout(config.embd_pdrop)
         self.ln_f = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
-        self.act_f = ACTBlock(GPT2Block(config), config.n_layer, config.n_embd, act_commitment_cost=act_commitment_cost, 
+        self.act_f = TWPBlock(GPT2Block(config), config.n_layer, config.n_embd, act_commitment_cost=act_commitment_cost, 
                               gradient_checkpointing=gradient_checkpointing, dynamic_stride=config.dynamic_stride)
         self.init_weights()
         # Model parallel
@@ -287,7 +298,7 @@ class GPT2ACTModel(GPT2ACTPreTrainedModel):
         for layer, heads in heads_to_prune.items():
             self.h[layer].attn.prune_heads(heads)
 
-    @add_start_docstrings_to_model_forward(GPT2_INPUTS_DOCSTRING)
+    @add_start_docstrings_to_model_forward(GPT2TWP_INPUTS_DOCSTRING)
     @add_code_sample_docstrings(
         checkpoint=_CHECKPOINT_FOR_DOC,
         output_type=ACTModelOutputWithPastAndCrossAttentions,
@@ -440,12 +451,12 @@ class GPT2ACTModel(GPT2ACTPreTrainedModel):
             ponder_cost=ponder_cost,
         )
     
-class GPT2ACTLMHeadModel(GPT2ACTPreTrainedModel):
+class GPT2TWPLMHeadModel(GPT2TWPPreTrainedModel):
     _keys_to_ignore_on_load_missing = [r"h\.\d+\.attn\.masked_bias", r"lm_head\.weight"]
 
     def __init__(self, config):
         super().__init__(config)
-        self.transformer = GPT2ACTModel(config)
+        self.transformer = GPT2TWPModel(config)
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
 
         self.init_weights()
@@ -599,147 +610,3 @@ class GPT2ACTLMHeadModel(GPT2ACTPreTrainedModel):
             fct_loss=loss_fct      
         )
 
-
-class GPT2ACTDistilation(GPT2ACTPreTrainedModel):
-    def __init__(self, config):
-
-        super().__init__(config)
-
-        self.teacher = GPT2LMHeadModel.from_pretrained(config.teacher)
-        self.student = GPT2ACTLMHeadModel(config)
-
-        self.teacher.eval()
-        for p in self.teacher.parameters():
-            p.requires_grad = False
-
-
-        self._lambda_kd = config.lambda_kd
-        self._temperature_kd = config.temperature_kd
-
-        self.model_parallel = False
-        self.device_map = None
-        self.first_device="cpu"
-        self.last_device="cpu"
-
-
-    @add_start_docstrings(PARALLELIZE_DOCSTRING)
-    def parallelize(self, device_map=None):
-        self.device_map = (
-            get_device_map(2, range(torch.cuda.device_count())) if device_map is None else device_map
-        )
-        assert_device_map(self.device_map, 2)
-        print('parallelize: self.device_map=', self.device_map)
-        self.model_parallel = True
-        self.first_device = "cpu" if "cpu" in self.device_map.keys() else "cuda:" + str(min(self.device_map.keys()))
-        self.last_device = "cuda:" + str(max(self.device_map.keys()))
-        self.student = self.student.to(self.first_device)
-        self.teacher = self.teacher.to(self.last_device)
-        self.model_parallel = True
-
-    @add_start_docstrings(DEPARALLELIZE_DOCSTRING)
-    def deparallelize(self):
-        print('deparallelize')
-        self.model_parallel = False
-        self.device_map = None
-        self.first_device = "cpu"
-        self.last_device = "cpu"
-        self.student = self.student.to(self.first_device)
-        self.teacher = self.teacher.to(self.last_device)
-        self.model_parallel = False
-        torch.cuda.empty_cache()
-
-    def copyweights(self, pretrained, freeze=False):
-        # initialize student with teacher's weights
-        self.student.copyweights(pretrained, model=self.teacher, freeze=freeze)
-        self.student.transformer.act_f._block.load_state_dict(self.teacher.transformer.h[0].state_dict())
-
-
-    def to_device(self, device="cpu", **kwargs):
-        if self.model_parallel:
-            return {k: kwargs[k].to(device) if kwargs[k] is not None else None for k in kwargs}
-        else:
-            return kwargs
-
-    def forward(
-        self,
-        input_ids=None,
-        past_key_values=None,
-        attention_mask=None,
-        token_type_ids=None,
-        position_ids=None,
-        head_mask=None,
-        inputs_embeds=None,
-        encoder_hidden_states=None,
-        encoder_attention_mask=None,
-        labels=None,
-        use_cache=None,
-        output_attentions=None,
-        output_hidden_states=None,
-        return_dict=None,
-    ):
-        r"""
-        labels (:obj:`torch.LongTensor` of shape :obj:`(batch_size, sequence_length)`, `optional`):
-            Labels for language modeling. Note that the labels **are shifted** inside the model, i.e. you can set
-            ``labels = input_ids`` Indices are selected in ``[-100, 0, ..., config.vocab_size]`` All labels set to
-            ``-100`` are ignored (masked), the loss is only computed for labels in ``[0, ..., config.vocab_size]``
-        """
-
-        # print('teacher.device', self.teacher.device)
-        # print('student.device', self.student.device)
-        # print('input_ids.device', input_ids.device)
-        # print('labels.device', labels.device)
-
-        if self.training:
-            with torch.no_grad():
-                teacher_outputs = self.teacher(**self.to_device(device=self.last_device,
-                    input_ids=input_ids,
-                    past_key_values=past_key_values,
-                    attention_mask=attention_mask,
-                    token_type_ids=token_type_ids,
-                    position_ids=position_ids,
-                    head_mask=head_mask,
-                    inputs_embeds=inputs_embeds,
-                    encoder_hidden_states=encoder_hidden_states,
-                    encoder_attention_mask=encoder_attention_mask,
-                    labels=labels,
-                    use_cache=use_cache,
-                    output_attentions=output_attentions,
-                    output_hidden_states=output_hidden_states,
-                    return_dict=return_dict,
-                ))
-            #print('teacher_outputs.loss', teacher_outputs.loss)
-
-        student_outputs = self.student(**self.to_device(device=self.first_device,
-            input_ids=input_ids,
-            past_key_values=past_key_values,
-            attention_mask=attention_mask,
-            token_type_ids=token_type_ids,
-            position_ids=position_ids,
-            head_mask=head_mask,
-            inputs_embeds=inputs_embeds,
-            encoder_hidden_states=encoder_hidden_states,
-            encoder_attention_mask=encoder_attention_mask,
-            labels=labels,
-            use_cache=use_cache,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
-        ))
-
-        if self.training:
-            if self.model_parallel:
-                teacher_outputs.logits = teacher_outputs.logits.to(self.first_device)
-
-            kd_loss = torch.nn.functional.kl_div(torch.nn.functional.log_softmax(student_outputs.logits/self._temperature_kd, dim=1),
-                                torch.nn.functional.softmax(teacher_outputs.logits/self._temperature_kd, dim=1),
-                                reduction='batchmean') * self._temperature_kd**2 * self._lambda_kd
-
-            #print('train: kd_loss', kd_loss)
-            student_outputs.loss = student_outputs.loss + kd_loss
-            #print('train: student_outputs.loss', student_outputs.loss)
-
-            return student_outputs
-
-        else:
-            #print('validate: student_outputs.loss', student_outputs.loss)
-            return student_outputs
