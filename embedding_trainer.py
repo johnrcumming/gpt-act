@@ -10,37 +10,27 @@ import datasets
 import wandb
 
 from transformers import GPT2Config
-from transformers import GPT2Tokenizer, GPT2TokenizerFast
+from transformers import GPT2Tokenizer, GPT2LMHeadModel
 from transformers import Trainer, TrainingArguments
 
-from gpt2_act import GPT2ACTLMHeadModel, GPT2ACTConfig, GPT2ACTDistilation
+from embeddings import BinaryEmbedding, BinaryRelativePositionEmbedding
 
-def group_texts(block_size, tokenizer=None, field='text'):
+def group_texts(block_size, tokenizer=None):
     def group_texts_fn(examples):
         if tokenizer is not None:
-            examples = tokenizer(examples[field])
+            examples = tokenizer(examples['text'])
         # Concatenate all texts.
         concatenated_examples = {k: sum(examples[k], []) for k in examples.keys() }
-        #print('concatenated_examples', {k: len(concatenated_examples[k]) for k in concatenated_examples.keys() })
-
         total_length = len(concatenated_examples[list(examples.keys())[0]])
-        #print('total_length', total_length)
-
         # We drop the small remainder, we could add padding if the model supported it instead of this drop, you can
             # customize this part to your needs.
         total_length = (total_length // block_size) * block_size
-        #print('total_length', total_length)
-
-        # Split by chunks of block_size.
+        # Split by chunks of max_len.
         result = {
             k: [t[i : i + block_size] for i in range(0, total_length, block_size)]
             for k, t in concatenated_examples.items()
         }
-        #print('result', {k: len(result[k]) for k in result.keys() })
-
         result["labels"] = result["input_ids"].copy()
-        #print('result', {k: len(result[k][0] if isinstance(result[k][0], list) else result[k]) for k in result.keys() })
-
         return result
     return group_texts_fn
 
@@ -54,21 +44,10 @@ def load_streaming_dataset(model_config, data_dir='data', dataset_name='wikitext
 
     tokenizer = GPT2Tokenizer.from_pretrained(model_config)
     tokenizer.pad_token = tokenizer.eos_token
-    model_max_length = tokenizer.model_max_length
-    tokenizer.model_max_length = int(1e20)  # LARGE_INTEGER
 
     dataset = datasets.load_dataset(dataset_name, dataset_config, data_dir=dataset_dir, cache_dir=cache_dir, streaming=True)
-
-    if 'text' in dataset['train'].column_names:
-        field = 'text'
-    elif 'sentence' in dataset['train'].column_names:
-        field = 'sentence'
-    elif 'content' in dataset['train'].column_names:
-        field = 'content'
-    else:
-        raise ValueError('Dataset does not contain a text field.')
-    
-    dataset = dataset.map(group_texts(model_max_length, tokenizer=tokenizer, field=field), batched=True, remove_columns=dataset['train'].column_names)
+    dataset = dataset.map(lambda examples: tokenizer(examples["text"]), batched=True, remove_columns=["text"])
+    dataset = dataset.map(group_texts(tokenizer.model_max_length), batched=True)
 
     return dataset
 
@@ -84,21 +63,10 @@ def preprocess_dataset(model_config, data_dir='data', cache_dir=None, dataset_na
 
         tokenizer = GPT2Tokenizer.from_pretrained(model_config)
         tokenizer.pad_token = tokenizer.eos_token
-        model_max_length = tokenizer.model_max_length
-        tokenizer.model_max_length = int(1e20)  # LARGE_INTEGER
 
-        dataset = datasets.load_dataset(dataset_name, dataset_config, data_dir=dataset_dir, cache_dir=cache_dir, num_proc=num_procs)
-
-        if 'text' in dataset['train'].column_names:
-            field = 'text'
-        elif 'sentence' in dataset['train'].column_names:
-            field = 'sentence'
-        elif 'content' in dataset['train'].column_names:
-            field = 'content'
-        else:
-            raise ValueError('Dataset does not contain a text field.')
-        
-        dataset = dataset.map(group_texts(model_max_length, tokenizer=tokenizer, field=field), num_proc=num_procs, batched=True, remove_columns=dataset['train'].column_names)
+        dataset = raw_dataset = datasets.load_dataset(dataset_name, dataset_config, data_dir=dataset_dir, cache_dir=cache_dir, num_proc=num_procs)
+        dataset = tok_dataset = dataset.map(lambda examples: tokenizer(examples["text"]), num_proc=num_procs, batched=True, remove_columns=["text"])
+        dataset = lm_dataset = tok_dataset.map(group_texts(tokenizer.model_max_length), num_proc=num_procs, batched=True)
 
         if 'validation' not in dataset:
             subdataset = dataset['train'].train_test_split(test_size=val_size, shuffle=True)
@@ -143,33 +111,23 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
         
     gpt2_config = GPT2Config.from_pretrained(model_config)
     gpt2_config.n_positions=n_positions
-    gpt2_config.tie_word_embeddings = not binary_embedding
+    
 
-    config = GPT2ACTConfig(act_commitment_cost=act_commitment_cost,
-                           gradient_checkpointing=gradient_checkpointing,
-                           dynamic_stride=dynamic_stride,
-                           lambda_kd=lambda_kd, temperature_kd=temperature_kd,
-                           teacher=model_config,
-                           use_binary_embedding=binary_embedding,
-                           **gpt2_config.to_dict())
-    if distill:
-        model = GPT2ACTDistilation(config)
-    else:
-        model = GPT2ACTLMHeadModel(config)
+    model = GPT2LMHeadModel(gpt2_config)
 
-    if pretrained:
-        model.copyweights(model_config, freeze_pretrained)
+    # Prepare Model
+    # First Freeze Model Weights
+    if freeze_pretrained:
+        for param in model.parameters():
+            param.requires_grad = False
+
+    # Replace torch.nn.Embedding with BinaryEmbedding
+    model.transformer.wte = BinaryEmbedding(model.transformer.wte.num_embeddings, model.transformer.wte.embedding_dim)
+    model.transformer.wpe = BinaryEmbedding(model.transformer.wpe.num_embeddings, model.transformer.wpe.embedding_dim)
 
     os.makedirs(base_logging_dir, exist_ok=True)
-    os.makedirs(checkpoint_dir, exist_ok=True)
-
-    if run_name is None:
-        run_dir = dataset_name + str(len(os.listdir(base_logging_dir)))
-        logging_dir = os.path.join(base_logging_dir, run_dir)
-        checkpoint_dir = os.path.join(checkpoint_dir, run_dir)
-    else:
-        logging_dir = os.path.join(base_logging_dir, run_name)
-        checkpoint_dir = os.path.join(checkpoint_dir, run_name)
+    run_dir = dataset_name + str(len(os.listdir(base_logging_dir)))
+    logging_dir = os.path.join(base_logging_dir, run_dir)
 
     training_args = TrainingArguments(
         output_dir= checkpoint_dir,          # output directory
@@ -229,7 +187,7 @@ def calculate_perplexity(data_dir='data', dataset_name='wikitext', model_config=
     if verbose:
         transformers.utils.logging.set_verbosity_info()
 
-    model = GPT2ACTLMHeadModel.from_pretrained(checkpoint, torch_dtype=torch.float16 if fp16 else torch.float).to('cpu' if no_cuda else 'cuda')
+    model = GPT2LMHeadModel.from_pretrained(checkpoint, torch_dtype=torch.float16 if fp16 else torch.float).to('cpu' if no_cuda else 'cuda')
 
     dataset_dir=os.path.join(data_dir, dataset_name)
     dataset = datasets.DatasetDict.load_from_disk(dataset_dir)
@@ -287,9 +245,9 @@ def main():
 
     parser.add_argument('--num_procs', type=int, default=2, help='Number of Processes for Dataset Processing.')
     parser.add_argument('--logging_steps', type=int, default=10, help='Log every n steps')
-    parser.add_argument('--save_steps', type=int, default=500, help='Save checkpoint every n steps.')
-    parser.add_argument('--warmup_steps', type=int, default=1000, help='Optimizer Warmup steps.')
-    parser.add_argument('--learning_rate', type=float, default=1e-3, help='Optimizer Learning Rate.')
+    parser.add_argument('--save_steps', type=int, default=50, help='Save checkpoint every n steps.')
+    parser.add_argument('--warmup_steps', type=int, default=200, help='Optimizer Warmup steps.')
+    parser.add_argument('--learning_rate', type=float, default=1e-4, help='Optimizer Learning Rate.')
 
     parser.add_argument('--binary_embedding', default=False, action='store_true', help='Use Experimental Binary Embedding.')
     parser.add_argument('--n_positions', type=int, default=1024, help='n_positions - context length.')

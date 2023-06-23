@@ -1,0 +1,25 @@
+FROM nvidia/cuda:12.1.0-devel-ubuntu22.04
+
+ENV PATH="/root/miniconda3/bin:${PATH}"
+ARG PATH="/root/miniconda3/bin:${PATH}"
+
+RUN apt-get update
+
+RUN apt-get install -y wget bash openssh-server openssh-client git nvtop curl
+RUN apt-get install -y apt-transport-https ca-certificates gnupg
+
+RUN wget \
+    https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh \
+    && mkdir /root/.conda \
+    && bash Miniconda3-latest-Linux-x86_64.sh -b \
+    && rm -f Miniconda3-latest-Linux-x86_64.sh 
+RUN conda init
+RUN conda --version
+
+RUN conda install python=3.10 
+
+COPY wheels/ /root/wheels/
+RUN pip install --pre /root/wheels/torch-2.1.0.dev20230616+cu121-cp310-cp310-linux_x86_64.whl --index-url https://download.pytorch.org/whl/nightly/cu121
+RUN pip install --pre torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu121
+RUN pip install jupyterlab transformers datasets tensorboard accelerate deepspeed fairscale wandb
+

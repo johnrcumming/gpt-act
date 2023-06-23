@@ -20,7 +20,7 @@ from transformers.modeling_outputs import ModelOutput
 
 from transformers import GPT2LMHeadModel
 
-
+from embeddings import BinaryEmbedding
 
 _CHECKPOINT_FOR_DOC = "gpt2act"
 _CONFIG_FOR_DOC = "GPT2ACTConfig"
@@ -29,7 +29,7 @@ _TOKENIZER_FOR_DOC = "GPT2Tokenizer"
 class GPT2ACTConfig(GPT2Config):
     def __init__(self, act_commitment_cost=1e-3, gradient_checkpointing=False, halting_function_spec=None, layerwise_attn=True,
                  local_window_size=None, use_relative_position=False, dynamic_stride=None, 
-                 teacher=None, lambda_kd=1e-4, temperature_kd=4.0, **kwargs):
+                 teacher=None, lambda_kd=1e-4, temperature_kd=4.0, use_binary_embedding=False,  **kwargs):
         """
         :class:`~transformers.GPT2ACTConfig` is the configuration class to store the configuration of a
         :class:`~transformers.GPT2ACTModel`.
@@ -45,6 +45,7 @@ class GPT2ACTConfig(GPT2Config):
             lambda_kd (:obj:`float`, `optional`, defaults to 1e-4):   The weight of the distillation loss.
             temperature_kd (:obj:`float`, `optional`, defaults to 4.0):   The temperature_kd for distillation.
             teacher (:obj:`GPT2LMHeadModel`, `optional`, defaults to :obj:`None`):   The teacher model for distillation.
+            use_binary_embedding (:obj:`bool`, `optional`, defaults to :obj:`False`):   If :obj:`True`, use binary embedding.
             kwargs (:obj:`Dict[str, any]`):   Remaining dictionary of keyword arguments from GPT2Config. 
         """
         self.act_commitment_cost = act_commitment_cost
@@ -53,6 +54,7 @@ class GPT2ACTConfig(GPT2Config):
         self.layerwise_attn = layerwise_attn
         self.local_window_size = local_window_size
         self.use_relative_position = use_relative_position
+        self.use_binary_embedding = use_binary_embedding
         self.dynamic_stride = dynamic_stride
         self.lambda_kd = lambda_kd
         self.temperature_kd = temperature_kd
@@ -85,6 +87,7 @@ class GPT2ACTPreTrainedModel(PreTrainedModel):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
 
+    
 class GPT2ACTRelativePositionEmbedding(nn.Module):
     """
     This module produces relative position embeddings given a position index tensor.
@@ -864,8 +867,13 @@ class GPT2ACTModel(GPT2ACTPreTrainedModel):
             act_commitment_cost = 1e-3
             gradient_checkpointing = False
 
-        self.wte = nn.Embedding(config.vocab_size, config.n_embd)  # Word Embedding 
-        self.wpe = nn.Embedding(config.n_positions, config.n_embd) # Position Embedding
+        if config.use_binary_embedding:
+            self.wte = BinaryEmbedding(config.vocab_size, config.n_embd)
+            self.wpe = BinaryEmbedding(config.n_positions, config.n_embd)
+        else:
+            self.wte = nn.Embedding(config.vocab_size, config.n_embd)  # Word Embedding 
+            self.wpe = nn.Embedding(config.n_positions, config.n_embd) # Position Embedding
+
         self.drop = nn.Dropout(config.embd_pdrop)
         self.ln_f = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
         self.act_f = ACTBlock(GPT2Block(config), config.n_layer, config.n_embd, act_commitment_cost=act_commitment_cost, 

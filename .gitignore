@@ -4,3 +4,14 @@ id_rsa.pub
 data/
 runs/
 checkpoints/
+wandb/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info
+dist/
+build/
+docs/_build/

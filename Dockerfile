@@ -1,4 +1,4 @@
-FROM nvidia/cuda:11.7.1-devel-ubuntu22.04
+FROM nvidia/cuda:12.1.0-devel-ubuntu22.04
 
 ENV PATH="/root/miniconda3/bin:${PATH}"
 ARG PATH="/root/miniconda3/bin:${PATH}"
@@ -22,10 +22,10 @@ RUN wget \
 RUN conda init
 RUN conda --version
 
-RUN conda install python=3.10 pytorch torchvision torchaudio pytorch-cuda=11.7 -c pytorch -c nvidia 
-RUN pip install jupyterlab transformers datasets tensorboard
-RUN pip install accelerate deepspeed fairscale wandb
-
+RUN conda install python=3.10 
+# RUN conda install pytorch torchvision torchaudio pytorch-cuda=11.8 -c pytorch -c nvidia 
+RUN pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu121
+RUN pip install jupyterlab transformers datasets tensorboard accelerate deepspeed fairscale wandb
 
 RUN mkdir /root/.ssh
 ADD id_rsa /root/.ssh/
