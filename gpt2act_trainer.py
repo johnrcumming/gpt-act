@@ -295,9 +295,9 @@ def main():
     parser.add_argument('--n_positions', type=int, default=1024, help='n_positions - context length.')
 
     parser.add_argument('--train_epochs', type=int, default=5, help='Training Epochs.')
-    parser.add_argument('--train_batch_size', type=int, default=32, help='Training Batch Size.')
-    parser.add_argument('--eval_batch_size', type=int, default=32, help='Evaluation Batch Size.')
-    parser.add_argument('--gradient_accumulation_steps', type=int, default=16, help='Gradient Accumulation Steps.')
+    parser.add_argument('--train_batch_size', type=int, default=16, help='Training Batch Size.')
+    parser.add_argument('--eval_batch_size', type=int, default=16, help='Evaluation Batch Size.')
+    parser.add_argument('--gradient_accumulation_steps', type=int, default=32, help='Gradient Accumulation Steps.')
     parser.add_argument('--parallelize', default=False, action='store_true', help='Parallelize Model - split model across GPUs.')
     parser.add_argument('--verbose', default=False, action='store_true', help='Verbose Logging.')
     parser.add_argument('--stream_dataset', default=False, action='store_true', help='Stream Dataset.')
