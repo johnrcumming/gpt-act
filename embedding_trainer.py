@@ -13,7 +13,7 @@ from transformers import GPT2Config
 from transformers import GPT2Tokenizer, GPT2LMHeadModel
 from transformers import Trainer, TrainingArguments
 
-from embeddings import BinaryEmbedding, BinaryRelativePositionEmbedding
+from embeddings import BinaryPositionEmbedding, BinaryRelativePositionEmbedding
 
 def group_texts(block_size, tokenizer=None):
     def group_texts_fn(examples):
@@ -122,8 +122,8 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
             param.requires_grad = False
 
     # Replace torch.nn.Embedding with BinaryEmbedding
-    model.transformer.wte = BinaryEmbedding(model.transformer.wte.num_embeddings, model.transformer.wte.embedding_dim)
-    model.transformer.wpe = BinaryEmbedding(model.transformer.wpe.num_embeddings, model.transformer.wpe.embedding_dim)
+    model.transformer.wte = BinaryPositionEmbedding(model.transformer.wte.num_embeddings, model.transformer.wte.embedding_dim)
+    model.transformer.wpe = BinaryPositionEmbedding(model.transformer.wpe.num_embeddings, model.transformer.wpe.embedding_dim)
 
     os.makedirs(base_logging_dir, exist_ok=True)
     run_dir = dataset_name + str(len(os.listdir(base_logging_dir)))

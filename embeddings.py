@@ -1,7 +1,7 @@
 import torch
 import math
 
-class BinaryEmbedding(torch.nn.Module):
+class BinaryPositionEmbedding(torch.nn.Module):
     """
     This module produces binary embeddings given a position index tensor.
     Binary Embeddings are a set of learnable embeddings that are the sum of a set of binary vectors.
@@ -11,7 +11,7 @@ class BinaryEmbedding(torch.nn.Module):
         d_model (:obj:`int`):  The hidden size of the embeddings.
     """
     def __init__(self, n_positions, d_model):
-        super(BinaryEmbedding, self).__init__()
+        super(BinaryPositionEmbedding, self).__init__()
         
         self.n_bits = math.ceil(math.log2(n_positions))
         self.d_model = d_model
@@ -58,7 +58,7 @@ class BinaryRelativePositionEmbedding(torch.nn.Module):
     """
     def __init__(self, max_position_embeddings, hidden_size):
         super().__init__()
-        self._embedding = BinaryEmbedding(2 * max_position_embeddings - 1, hidden_size)
+        self._embedding = BinaryPositionEmbedding(2 * max_position_embeddings - 1, hidden_size)
 
     def forward(self, q, k):
         """

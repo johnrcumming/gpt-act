@@ -20,7 +20,7 @@ from transformers.modeling_outputs import ModelOutput
 
 from transformers import GPT2LMHeadModel
 
-from embeddings import BinaryEmbedding
+from embeddings import BinaryPositionEmbedding
 
 _CHECKPOINT_FOR_DOC = "gpt2act"
 _CONFIG_FOR_DOC = "GPT2ACTConfig"
@@ -868,8 +868,8 @@ class GPT2ACTModel(GPT2ACTPreTrainedModel):
             gradient_checkpointing = False
 
         if config.use_binary_embedding:
-            self.wte = BinaryEmbedding(config.vocab_size, config.n_embd)
-            self.wpe = BinaryEmbedding(config.n_positions, config.n_embd)
+            self.wte = BinaryPositionEmbedding(config.vocab_size, config.n_embd)
+            self.wpe = BinaryPositionEmbedding(config.n_positions, config.n_embd)
         else:
             self.wte = nn.Embedding(config.vocab_size, config.n_embd)  # Word Embedding 
             self.wpe = nn.Embedding(config.n_positions, config.n_embd) # Position Embedding
