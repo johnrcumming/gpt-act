@@ -74,3 +74,28 @@ class BinaryRelativePositionEmbedding(torch.nn.Module):
         relative_scores = torch.einsum('bhld,md->bhlm', q, relative_positions)
         return relative_scores
 
+class RelativePositionEmbedding(torch.nn.Module):
+    """
+    This module produces relative position embeddings given a position index tensor.
+    
+    Args:
+        max_position_embeddings (:obj:`int`):  The maximum value of the dimensionality of position embeddings, i.e. :obj:`max_position_embeddings` = :obj:`seq_length + 1`.
+        hidden_size (:obj:`int`):  The hidden size of the embeddings.
+    """
+    def __init__(self, max_position_embeddings, hidden_size):
+        super().__init__()
+        self._embedding = torch.nn.Embedding(2 * max_position_embeddings - 1, hidden_size)
+
+    def forward(self, q, k):
+        """
+        Args:
+            q (:obj:`torch.Tensor`):  The query tensor of shape :obj:`(batch_size, num_heads, seq_length, dim_per_head)`.
+            k (:obj:`torch.Tensor`):  The key tensor of shape :obj:`(batch_size, num_heads, seq_length, dim_per_head)`.
+        Returns:
+            :obj:`torch.Tensor`:  The relative position embedding of shape :obj:`(batch_size, num_heads, seq_length, seq_length)`.
+        """
+        seq_length = q.size(-2)
+        positions = torch.arange(-seq_length + 1, seq_length, device=q.device).long()
+        relative_positions = self._embedding(positions)
+        relative_scores = torch.einsum('bhld,md->bhlm', q, relative_positions)
+        return relative_scores
