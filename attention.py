@@ -8,7 +8,6 @@ from embeddings import RelativePositionEmbedding
 class LocalAttention(nn.Module):
     """
     This module implements local attention.
-    
     Args:
         hidden_size (:obj:`int`):  The hidden size of the attention.
         num_heads (:obj:`int`):  The number of attention heads.
