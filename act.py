@@ -5,7 +5,7 @@ import copy
 
 import numpy as np
 
-from attention import LocalAttention
+from attention import LocalAttention, MultiHeadAttention
 
 
 class ACTHaltingFunction(nn.Module):
@@ -271,6 +271,7 @@ class ACTBlock(nn.Module):
                 fhalting.append(nn.Linear(hiddens,hiddens))
             elif l == 'c':
                 fhalting.append(MoveChannels(nn.Conv1d(hiddens,hiddens, int(kernel) if kernel.isdigit() else 1), -1, 1))
+                kernel=""
             elif l == 'n':
                 fhalting.append(nn.LayerNorm(hiddens))
             elif l == 'b':
@@ -280,8 +281,13 @@ class ACTBlock(nn.Module):
             elif l == 'r':   
                 fhalting.append(nn.ReLU())
             elif l == 'a':
-                fhalting.append(LocalAttention(hiddens, kernel))
-        
+                if self._local_window_size:
+                    fhalting.append(LocalAttention(hiddens, int(kernel)))
+                else:
+                    fhalting.append(MultiHeadAttention(hiddens, int(kernel)))
+                kernel=""
+
+
         if halting_function[-1] == 'l':
             fhalting.append(nn.Linear(hiddens,1))    
         elif halting_function[-1] == 'c':

@@ -1,9 +1,11 @@
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 import math
 
 from embeddings import RelativePositionEmbedding
 
-class LocalAttention(torch.torch.nn.Module):
+class LocalAttention(nn.Module):
     """
     This module implements local attention.
     
@@ -21,11 +23,12 @@ class LocalAttention(torch.torch.nn.Module):
         self.num_heads = num_heads
         self.local_window_size = local_window_size
 
-        self.query = torch.nn.Linear(hidden_size, hidden_size)
-        self.key = torch.nn.Linear(hidden_size, hidden_size)
-        self.value = torch.nn.Linear(hidden_size, hidden_size)
+        self.query_linear = nn.Linear(hidden_size, hidden_size)
+        self.key_linear = nn.Linear(hidden_size, hidden_size)
+        self.value_linear = nn.Linear(hidden_size, hidden_size)
+        self.out_linear = nn.Linear(hidden_size, hidden_size)
 
-        self.dropout = torch.nn.Dropout(dropout)
+        self.dropout = nn.Dropout(dropout)
 
         self.use_relative_position = use_relative_position
         if use_relative_position:
@@ -41,9 +44,9 @@ class LocalAttention(torch.torch.nn.Module):
         Returns:
             :obj:`torch.Tensor`:  The output tensor of shape :obj:`(batch_size, seq_length, hidden_size)`.
         """
-        q = self.query(hidden_states)
-        k = self.key(hidden_states)
-        v = self.value(hidden_states)
+        q = self.query_linear(hidden_states)
+        k = self.key_linear(hidden_states)
+        v = self.value_linear(hidden_states)
 
         q = self._split_heads(q)
         k = self._split_heads(k)
@@ -62,7 +65,7 @@ class LocalAttention(torch.torch.nn.Module):
         if attention_mask is not None:
             attn_scores = attn_scores + attention_mask
 
-        attn_probs = torch.nn.functional.softmax(attn_scores, dim=-1)
+        attn_probs = F.softmax(attn_scores, dim=-1)
         attn_probs = self.dropout(attn_probs)
 
         if head_mask is not None:
@@ -70,6 +73,8 @@ class LocalAttention(torch.torch.nn.Module):
 
         attn_output = torch.matmul(attn_probs, v)
         attn_output = self._merge_heads(attn_output)
+
+        attn_output = self.out_linear(attn_output)
 
         return attn_output
 
@@ -96,3 +101,55 @@ class LocalAttention(torch.torch.nn.Module):
             attn_scores.append(local_attn_scores)
 
         return torch.cat(attn_scores, dim=-2)
+
+
+class MultiHeadAttention(nn.Module):
+    def __init__(self, hidden_size, num_heads, dropout=0.1):
+        super(MultiHeadAttention, self).__init__()
+
+        assert hidden_size % num_heads == 0, "d_model must be divisible by num_heads"
+        
+        self.d_model = hidden_size
+        self.num_heads = num_heads
+        self.d_k = hidden_size // num_heads
+
+        self.query_linear = nn.Linear(hidden_size, hidden_size)
+        self.key_linear = nn.Linear(hidden_size, hidden_size)
+        self.value_linear = nn.Linear(hidden_size, hidden_size)
+        self.out_linear = nn.Linear(hidden_size, hidden_size)
+
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, hidden_states, attention_mask=None, head_mask=None):
+        batch_size = hidden_states.size(0)
+
+        query = self.query_linear(hidden_states).view(batch_size, -1, self.num_heads, self.d_k)
+        key = self.key_linear(hidden_states).view(batch_size, -1, self.num_heads, self.d_k)
+        value = self.value_linear(hidden_states).view(batch_size, -1, self.num_heads, self.d_k)
+
+        query, key, value = [x.transpose(1, 2) for x in (query, key, value)]
+
+        if attention_mask is not None:
+            attention_mask = attention_mask.unsqueeze(1)
+
+        # Apply Scaled Dot Product Attention using einsum
+        scores = torch.einsum("bnqd,bnkd->bnqk", [query, key]) / math.sqrt(self.d_k)
+        if attention_mask is not None:
+            scores = scores.masked_fill(attention_mask == 0, -1e9)
+        attn_weights = F.softmax(scores, dim=-1)
+        
+        # Apply Dropout to attention weights
+        attn_weights = self.dropout(attn_weights)
+
+        # Apply head_mask if it is not None
+        if head_mask is not None:
+            attn_weights = attn_weights * head_mask
+
+        context = torch.einsum("bnqk,bnkd->bnqd", [attn_weights, value])
+
+        context = context.transpose(1, 2).contiguous().view(batch_size, -1, self.d_model)
+
+        output = self.out_linear(context)
+
+        return output
+

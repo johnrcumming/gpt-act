@@ -21,7 +21,7 @@ from transformers.modeling_outputs import ModelOutput
 from transformers import GPT2LMHeadModel
 
 from embeddings import BinaryPositionEmbedding, RelativePositionEmbedding
-from attention import LocalAttention
+from act import ACTBlock
 
 _CHECKPOINT_FOR_DOC = "gpt2act"
 _CONFIG_FOR_DOC = "GPT2ACTConfig"

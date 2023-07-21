@@ -122,7 +122,7 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
           push_to_hub_model_id=None, push_to_hub_organization=None, push_to_hub_token=None,
           report_to="all", run_name=None, no_cuda=False, logging_steps=10, save_steps=500, warmup_steps=5000, learning_rate=1e-5,
           deepspeed_config=None, dynamic_stride=None, distill=False,
-          binary_embedding=False, n_positions=1024):    
+          binary_embedding=False, n_positions=1024, halting_function_spec=None):    
     """Train a GPT2ACT model on a dataset."""
 
     wandb.init(project='gpt2act', name=run_name)
@@ -151,6 +151,7 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
                            lambda_kd=lambda_kd, temperature_kd=temperature_kd,
                            teacher=model_config,
                            use_binary_embedding=binary_embedding,
+                           halting_function_spec=halting_function_spec,
                            **gpt2_config.to_dict())
     if distill:
         model = GPT2ACTDistilation(config)
@@ -314,6 +315,8 @@ def main():
     parser.add_argument('--report_to', type=str, default="all", help='The list of integrations to report the results and logs to. Supported platforms are "azure_ml", "comet_ml", "mlflow", "tensorboard" and "wandb". Use "all" to report to all integrations installed, "none" for no integrations.')
     parser.add_argument('--run_name', type=str, default=None, help='A descriptor for the run. Typically used for wandb logging.')
 
+    parser.add_argument('--halting_function_spec', type=str, default=None, help='Halting Function Spec.')
+
     args = parser.parse_args()
 
     if args.preprocess_dataset:
@@ -333,7 +336,7 @@ def main():
                 no_cuda=args.no_cuda, logging_steps=args.logging_steps, save_steps=args.save_steps, learning_rate=args.learning_rate,
                 warmup_steps=args.warmup_steps, deepspeed_config=args.deepspeed_config, dynamic_stride=args.dynamic_stride,
                 max_grad_norm=args.max_grad_norm, distill=args.distill,
-                binary_embedding=args.binary_embedding, n_positions=args.n_positions
+                binary_embedding=args.binary_embedding, n_positions=args.n_positions, halting_function_spec=args.halting_function_spec
              )
         
     if args.calculate_perplexity:
