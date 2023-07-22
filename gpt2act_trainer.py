@@ -120,9 +120,9 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
           pretrained=None, freeze_pretrained=False, lambda_kd=1e-4, temperature_kd=4.0, max_grad_norm=1.0,
           stream_dataset=False, max_steps=-1, storage_options=None, num_procs=10,
           push_to_hub_model_id=None, push_to_hub_organization=None, push_to_hub_token=None,
-          report_to="all", run_name=None, no_cuda=False, logging_steps=10, save_steps=500, warmup_steps=5000, learning_rate=1e-5,
+          report_to="all", run_name=None, no_cuda=False, logging_steps=10, save_steps=500, eval_steps=0, warmup_steps=5000, learning_rate=1e-5,
           deepspeed_config=None, dynamic_stride=None, distill=False,
-          binary_embedding=False, n_positions=1024, halting_function_spec=None):    
+          binary_embedding=False, n_positions=1024, halting_function_spec=None, layerwise_attn=True):    
     """Train a GPT2ACT model on a dataset."""
 
     wandb.init(project='gpt2act', name=run_name)
@@ -152,6 +152,7 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
                            teacher=model_config,
                            use_binary_embedding=binary_embedding,
                            halting_function_spec=halting_function_spec,
+                           layerwise_attn=layerwise_attn,
                            **gpt2_config.to_dict())
     if distill:
         model = GPT2ACTDistilation(config)
@@ -172,6 +173,14 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
         logging_dir = os.path.join(base_logging_dir, run_name)
         checkpoint_dir = os.path.join(checkpoint_dir, run_name)
 
+    if eval_batch_size > 0:
+        if eval_steps > 0:
+            evaluation_strategy = 'steps'
+        else:
+            evaluation_strategy = 'epoch'
+    else:
+        evaluation_strategy = 'no'
+
     training_args = TrainingArguments(
         output_dir= checkpoint_dir,          # output directory
         logging_dir= logging_dir,
@@ -183,7 +192,8 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
         weight_decay=0.01,               # strength of weight decay
         save_total_limit=5,
         logging_steps=logging_steps,
-        evaluation_strategy='epoch' if eval_batch_size > 0 else 'no',
+        evaluation_strategy=evaluation_strategy,
+        eval_steps=eval_steps,
         save_strategy='steps',
         save_steps=save_steps,
         gradient_accumulation_steps=gradient_accumulation_steps,
@@ -289,6 +299,7 @@ def main():
     parser.add_argument('--num_procs', type=int, default=2, help='Number of Processes for Dataset Processing.')
     parser.add_argument('--logging_steps', type=int, default=10, help='Log every n steps')
     parser.add_argument('--save_steps', type=int, default=500, help='Save checkpoint every n steps.')
+    parser.add_argument('--eval_steps', type=int, default=0, help='Evaluate every n steps, default evaluate at epoch.')
     parser.add_argument('--warmup_steps', type=int, default=1000, help='Optimizer Warmup steps.')
     parser.add_argument('--learning_rate', type=float, default=1e-3, help='Optimizer Learning Rate.')
 
@@ -316,6 +327,7 @@ def main():
     parser.add_argument('--run_name', type=str, default=None, help='A descriptor for the run. Typically used for wandb logging.')
 
     parser.add_argument('--halting_function_spec', type=str, default=None, help='Halting Function Spec.')
+    parser.add_argument('--no_layerwise_attn', dest='layerwise_attn', default=True, action='store_false', help='Disable Layerwise Attention.')
 
     args = parser.parse_args()
 
@@ -333,10 +345,10 @@ def main():
                 verbose=args.verbose, stream_dataset=args.stream_dataset, fp16=args.fp16, max_steps=args.max_steps, num_procs=args.num_procs,
                 push_to_hub_model_id=args.push_to_hub_model_id, push_to_hub_organization=args.push_to_hub_organization, push_to_hub_token=args.push_to_hub_token,
                 report_to=args.report_to, run_name=args.run_name,
-                no_cuda=args.no_cuda, logging_steps=args.logging_steps, save_steps=args.save_steps, learning_rate=args.learning_rate,
+                no_cuda=args.no_cuda, logging_steps=args.logging_steps, save_steps=args.save_steps, eval_steps=args.eval_steps, learning_rate=args.learning_rate,
                 warmup_steps=args.warmup_steps, deepspeed_config=args.deepspeed_config, dynamic_stride=args.dynamic_stride,
                 max_grad_norm=args.max_grad_norm, distill=args.distill,
-                binary_embedding=args.binary_embedding, n_positions=args.n_positions, halting_function_spec=args.halting_function_spec
+                binary_embedding=args.binary_embedding, n_positions=args.n_positions, halting_function_spec=args.halting_function_spec, layerwise_attn=args.layerwise_attn
              )
         
     if args.calculate_perplexity:

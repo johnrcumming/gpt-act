@@ -247,7 +247,8 @@ class ACTBlock(nn.Module):
         self._wle = nn.Embedding(layers, hiddens) # Layer Embedding
 
         if self._layerwise_attn:
-            self._layer_attention_proj = nn.Linear(hiddens, hiddens)
+            #self._layer_attention_proj = nn.Linear(hiddens, hiddens)
+            self._layerwise_mha = MultiHeadAttention(hiddens, block.attn.num_heads)
 
         if halting_function_spec is not None:
             self._Fhalting = self.make_halting_function(halting_function_spec, hiddens)  
@@ -406,10 +407,11 @@ class ACTBlock(nn.Module):
         stacked_outputs = torch.stack(layer_outputs, dim=2)  # Shape: [batch_size, seq_length, num_layers, hidden_size]
 
         if self._layerwise_attn:
-            projected_input = self._layer_attention_proj(hidden_states)  # Shape: [batch_size, seq_length, hidden_size]
-            attention_scores = torch.einsum('bsh,bsth->bst', projected_input, stacked_outputs)  # Shape: [batch_size, seq_length, num_layers]
-            attention_probs = torch.softmax(attention_scores, dim=-1)  # Shape: [batch_size, seq_length, num_layers]
-            weighted_outputs = torch.einsum('bst,bsth->bsh', attention_probs, stacked_outputs)  # Shape: [batch_size, seq_length, hidden_size]
+            # projected_input = self._layer_attention_proj(hidden_states)  # Shape: [batch_size, seq_length, hidden_size]
+            # attention_scores = torch.einsum('bsh,bsth->bst', projected_input, stacked_outputs)  # Shape: [batch_size, seq_length, num_layers]
+            # attention_probs = torch.softmax(attention_scores, dim=-1)  # Shape: [batch_size, seq_length, num_layers]
+            # weighted_outputs = torch.einsum('bst,bsth->bsh', attention_probs, stacked_outputs)  # Shape: [batch_size, seq_length, hidden_size]
+            weighted_outputs = self._layerwise_mha(hidden_states)
             return [weighted_outputs, presents, all_hidden_states, all_self_attentions, all_cross_attentions, act_loss, ponder_cost]
         else:
             return [previous_state, presents, all_hidden_states, all_self_attentions, all_cross_attentions, act_loss, ponder_cost]
