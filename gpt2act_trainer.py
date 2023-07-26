@@ -17,7 +17,7 @@ from transformers import Trainer, TrainingArguments
 
 from gpt2_act import GPT2ACTLMHeadModel, GPT2ACTConfig, GPT2ACTDistilation
 
-def group_texts(block_size, tokenizer=None, field='text'):
+def GroupTexts(block_size, tokenizer=None, field='text'):
     def group_texts_fn(examples):
         if tokenizer is not None:
             examples = tokenizer(examples[field])
@@ -71,7 +71,7 @@ def load_streaming_dataset(model_config, data_dir='data', dataset_name='wikitext
         raise ValueError('Dataset does not contain a text field.')
     
     if group_texts:
-        dataset = dataset.map(group_texts(model_max_length, tokenizer=tokenizer, field=field), batched=True, remove_columns=dataset['train'].column_names)
+        dataset = dataset.map(GroupTexts(model_max_length, tokenizer=tokenizer, field=field), batched=True, remove_columns=dataset['train'].column_names)
 
     return dataset
 
@@ -102,7 +102,7 @@ def preprocess_dataset(model_config, data_dir='data', cache_dir=None, dataset_na
             raise ValueError('Dataset does not contain a text field.')
         
         if group_texts:
-            dataset = dataset.map(group_texts(model_max_length, tokenizer=tokenizer, field=field), num_proc=num_procs, batched=True, remove_columns=dataset['train'].column_names)
+            dataset = dataset.map(GroupTexts(model_max_length, tokenizer=tokenizer, field=field), num_proc=num_procs, batched=True, remove_columns=dataset['train'].column_names)
 
         if 'validation' not in dataset:
             subdataset = dataset['train'].train_test_split(test_size=val_size, shuffle=True)
