@@ -229,7 +229,7 @@ class ACTBlock(nn.Module):
         dynamic_stride: Use dynamic stride   
     """
     def __init__(self, block, layers, hiddens, initial_halting_bias=-1, act_commitment_cost=1e-3, layer_penalty=1e-3, epsilon=1e-2, 
-                 gradient_checkpointing=False, add_cross_attention=False, halting_function_spec=None, layerwise_attn=True,
+                 gradient_checkpointing=False, add_cross_attention=False, halting_function_spec=None, layerwise_attn="simple",
                  local_window_size=None, use_relative_position=False, dynamic_stride=None):
         super().__init__()
 
@@ -246,9 +246,19 @@ class ACTBlock(nn.Module):
         self._add_cross_attention = add_cross_attention
         self._wle = nn.Embedding(layers, hiddens) # Layer Embedding
 
-        if self._layerwise_attn:
-            #self._layer_attention_proj = nn.Linear(hiddens, hiddens)
-            self._layerwise_mha = MultiHeadAttention(hiddens, block.attn.num_heads)
+        print('layerwise_attn', layerwise_attn)
+
+        if self._layerwise_attn == "simple" or self._layerwise_attn == True:
+            self._layer_attention_proj = nn.Linear(hiddens, hiddens)
+        elif self._layerwise_attn == "mha":
+            self._layer_attention_mha = torch.nn.MultiheadAttention(hiddens, block.attn.num_heads, dropout=0.1)
+        elif self._layerwise_attn == "sha":
+            self._layer_attention_mha = torch.nn.MultiheadAttention(hiddens, 1, dropout=0.1)
+        elif self._layerwise_attn == "mha2":
+            self._layer_attention_mha = MultiHeadAttention(hiddens, block.attn.num_heads, dropout=0.1)
+        elif self._layerwise_attn == "sha2":
+            self._layer_attention_mha = MultiHeadAttention(hiddens, 1, dropout=0.1)
+
 
         if halting_function_spec is not None:
             self._Fhalting = self.make_halting_function(halting_function_spec, hiddens)  
@@ -308,7 +318,7 @@ class ACTBlock(nn.Module):
         all_cross_attentions = () if output_attentions and self._add_cross_attention else None
         all_hidden_states = () if output_hidden_states else None
         
-        if self._layerwise_attn:
+        if self._layerwise_attn is not None:
             layer_outputs = []
 
         while ((halting_probability<self._threshold) & (n_updates < self._layers)).bool().any():
@@ -382,7 +392,7 @@ class ACTBlock(nn.Module):
 
             hidden_states, present = outputs[:2]
 
-            if self._layerwise_attn:
+            if self._layerwise_attn is not None:
                 layer_outputs.append(hidden_states)
 
             if use_cache is True:
@@ -406,13 +416,21 @@ class ACTBlock(nn.Module):
 
         stacked_outputs = torch.stack(layer_outputs, dim=2)  # Shape: [batch_size, seq_length, num_layers, hidden_size]
 
-        if self._layerwise_attn:
-            # projected_input = self._layer_attention_proj(hidden_states)  # Shape: [batch_size, seq_length, hidden_size]
-            # attention_scores = torch.einsum('bsh,bsth->bst', projected_input, stacked_outputs)  # Shape: [batch_size, seq_length, num_layers]
-            # attention_probs = torch.softmax(attention_scores, dim=-1)  # Shape: [batch_size, seq_length, num_layers]
-            # weighted_outputs = torch.einsum('bst,bsth->bsh', attention_probs, stacked_outputs)  # Shape: [batch_size, seq_length, hidden_size]
-            weighted_outputs = self._layerwise_mha(hidden_states)
+        if self._layerwise_attn == "simple" or self._layerwise_attn == True:
+            projected_input = self._layer_attention_proj(hidden_states)  # Shape: [batch_size, seq_length, hidden_size]
+            attention_scores = torch.einsum('bsh,bsth->bst', projected_input, stacked_outputs)  # Shape: [batch_size, seq_length, num_layers]
+            attention_probs = torch.softmax(attention_scores, dim=-1)  # Shape: [batch_size, seq_length, num_layers]
+            weighted_outputs = torch.einsum('bst,bsth->bsh', attention_probs, stacked_outputs)  # Shape: [batch_size, seq_length, hidden_size]
             return [weighted_outputs, presents, all_hidden_states, all_self_attentions, all_cross_attentions, act_loss, ponder_cost]
+        
+        elif self._layerwise_attn == "mha" or self._layerwise_attn == "sha":
+            weighted_outputs = self._layer_attention_mha(hidden_states, hidden_states, hidden_states)[0]
+            return [weighted_outputs, presents, all_hidden_states, all_self_attentions, all_cross_attentions, act_loss, ponder_cost]
+
+        elif self._layerwise_attn == "mha2" or self._layerwise_attn == "sha2":
+            weighted_outputs = self._layer_attention_mha(hidden_states)
+            return [weighted_outputs, presents, all_hidden_states, all_self_attentions, all_cross_attentions, act_loss, ponder_cost]
+
         else:
             return [previous_state, presents, all_hidden_states, all_self_attentions, all_cross_attentions, act_loss, ponder_cost]
 

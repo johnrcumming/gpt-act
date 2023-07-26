@@ -28,7 +28,7 @@ _CONFIG_FOR_DOC = "GPT2ACTConfig"
 _TOKENIZER_FOR_DOC = "GPT2Tokenizer"
 
 class GPT2ACTConfig(GPT2Config):
-    def __init__(self, act_commitment_cost=1e-3, gradient_checkpointing=False, halting_function_spec=None, layerwise_attn=True,
+    def __init__(self, act_commitment_cost=1e-3, gradient_checkpointing=False, halting_function_spec=None, layerwise_attn="simple",
                  local_window_size=None, use_relative_position=False, dynamic_stride=None, 
                  teacher=None, lambda_kd=1e-4, temperature_kd=4.0, use_binary_embedding=False,  **kwargs):
         """
@@ -39,7 +39,7 @@ class GPT2ACTConfig(GPT2Config):
             act_commitment_cost (:obj:`float`, `optional`, defaults to 1e-3):   The cost of the commitment ACT loss.
             gradient_checkpointing (:obj:`bool`, `optional`, defaults to :obj:`False`):   If :obj:`True`, use gradient checkpointing to save memory at the expense of slower backward pass.
             halting_function_spec (:obj:`str`, `optional`, defaults to :obj:`None`):   The specification of the halting function. If :obj:`None`, the ACTLinearHaltingFunction function is not used.
-            layerwise_attn (:obj:`bool`, `optional`, defaults to :obj:`True`):   If :obj:`True`, use layerwise attention.
+            layerwise_attn (:obj:`string`, `optional`, defaults to :obj:`simple`):   If not :obj:`None`, use layerwise attention, 'simple' - simple attention, mha - MultiHeadedAttention.
             local_window_size (:obj:`int`, `optional`, defaults to :obj:`None`):   The size of the local window. If :obj:`None`, the global attention is used.
             use_relative_position (:obj:`bool`, `optional`, defaults to :obj:`False`):   If :obj:`True`, use relative position embedding.
             dynamic_stride (:obj:`bool`, `optional`, defaults to :obj:`None`):   If :obj: is a number, use dynamic stride.
@@ -354,7 +354,7 @@ class GPT2ACTModel(GPT2ACTPreTrainedModel):
         self.drop = nn.Dropout(config.embd_pdrop)
         self.ln_f = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
         self.act_f = ACTBlock(GPT2Block(config), config.n_layer, config.n_embd, act_commitment_cost=act_commitment_cost, 
-                              gradient_checkpointing=gradient_checkpointing, dynamic_stride=config.dynamic_stride)
+                              gradient_checkpointing=gradient_checkpointing, dynamic_stride=config.dynamic_stride, layerwise_attn=config.layerwise_attn)
         self.init_weights()
         # Model parallel
         self.model_parallel = False
@@ -687,6 +687,8 @@ class GPT2ACTLMHeadModel(GPT2ACTPreTrainedModel):
         lm_logits = self.lm_head(hidden_states)
 
         loss = None
+        loss_fct = None
+
         if labels is not None:
             # Shift so that tokens < n predict n
             shift_logits = lm_logits[..., :-1, :].contiguous()

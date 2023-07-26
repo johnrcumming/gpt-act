@@ -13,6 +13,8 @@ from transformers import GPT2Config
 from transformers import GPT2Tokenizer, GPT2TokenizerFast
 from transformers import Trainer, TrainingArguments
 
+
+
 from gpt2_act import GPT2ACTLMHeadModel, GPT2ACTConfig, GPT2ACTDistilation
 
 def group_texts(block_size, tokenizer=None, field='text'):
@@ -44,7 +46,7 @@ def group_texts(block_size, tokenizer=None, field='text'):
         return result
     return group_texts_fn
 
-def load_streaming_dataset(model_config, data_dir='data', dataset_name='wikitext', dataset_config=None, num_procs=10, val_size=0.05, test_size=0.05):
+def load_streaming_dataset(model_config, data_dir='data', dataset_name='wikitext', dataset_config=None, num_procs=10, val_size=0.05, test_size=0.05, group_texts=True):
     """Load a streaming dataset from the datasets library, and preprocess it for training."""
     dataset_dir = os.path.join(data_dir, dataset_name)
     cache_dir = os.path.join(data_dir, 'cache')
@@ -68,11 +70,12 @@ def load_streaming_dataset(model_config, data_dir='data', dataset_name='wikitext
     else:
         raise ValueError('Dataset does not contain a text field.')
     
-    dataset = dataset.map(group_texts(model_max_length, tokenizer=tokenizer, field=field), batched=True, remove_columns=dataset['train'].column_names)
+    if group_texts:
+        dataset = dataset.map(group_texts(model_max_length, tokenizer=tokenizer, field=field), batched=True, remove_columns=dataset['train'].column_names)
 
     return dataset
 
-def preprocess_dataset(model_config, data_dir='data', cache_dir=None, dataset_name='wikitext', dataset_config=None, num_procs=10, val_size=0.05, test_size=0.05):
+def preprocess_dataset(model_config, data_dir='data', cache_dir=None, dataset_name='wikitext', dataset_config=None, num_procs=10, val_size=0.05, test_size=0.05, group_texts=True):
     """Load a dataset from the datasets library, and preprocess it for training. and save dataset locally."""
     dataset_dir = os.path.join(data_dir, dataset_name)
     if cache_dir is None:
@@ -98,7 +101,8 @@ def preprocess_dataset(model_config, data_dir='data', cache_dir=None, dataset_na
         else:
             raise ValueError('Dataset does not contain a text field.')
         
-        dataset = dataset.map(group_texts(model_max_length, tokenizer=tokenizer, field=field), num_proc=num_procs, batched=True, remove_columns=dataset['train'].column_names)
+        if group_texts:
+            dataset = dataset.map(group_texts(model_max_length, tokenizer=tokenizer, field=field), num_proc=num_procs, batched=True, remove_columns=dataset['train'].column_names)
 
         if 'validation' not in dataset:
             subdataset = dataset['train'].train_test_split(test_size=val_size, shuffle=True)
@@ -122,7 +126,7 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
           push_to_hub_model_id=None, push_to_hub_organization=None, push_to_hub_token=None,
           report_to="all", run_name=None, no_cuda=False, logging_steps=10, save_steps=500, eval_steps=0, warmup_steps=5000, learning_rate=1e-5,
           deepspeed_config=None, dynamic_stride=None, distill=False,
-          binary_embedding=False, n_positions=1024, halting_function_spec=None, layerwise_attn=True):    
+          binary_embedding=False, n_positions=1024, halting_function_spec=None, layerwise_attn="simple", group_texts=True):    
     """Train a GPT2ACT model on a dataset."""
 
     wandb.init(project='gpt2act', name=run_name)
@@ -130,8 +134,10 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
     if verbose:
         transformers.utils.logging.set_verbosity_info()
 
+    transformers.set_seed(42)
+
     if stream_dataset:
-        dataset = load_streaming_dataset(model_config, data_dir=data_dir, dataset_name=dataset_name)
+        dataset = load_streaming_dataset(model_config, data_dir=data_dir, dataset_name=dataset_name, group_texts=group_texts)
         train_dataset = dataset['train']
         val_dataset = dataset['validation'] if 'validation' in dataset else None
 
@@ -154,6 +160,10 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
                            halting_function_spec=halting_function_spec,
                            layerwise_attn=layerwise_attn,
                            **gpt2_config.to_dict())
+    
+    config.n_embd = 3 * config.n_embd // 2
+
+
     if distill:
         model = GPT2ACTDistilation(config)
     else:
@@ -327,13 +337,14 @@ def main():
     parser.add_argument('--run_name', type=str, default=None, help='A descriptor for the run. Typically used for wandb logging.')
 
     parser.add_argument('--halting_function_spec', type=str, default=None, help='Halting Function Spec.')
-    parser.add_argument('--no_layerwise_attn', dest='layerwise_attn', default=True, action='store_false', help='Disable Layerwise Attention.')
+    parser.add_argument('--layerwise_attn', type=str, default=None, choices=['simple', 'mha', 'sha'], help='Set Layerwise Attention.')
 
+    parser.add_argument('--no_group_texts', dest='group_texts', default=True, action='store_false', help='Disable Text Grouping')
     args = parser.parse_args()
 
     if args.preprocess_dataset:
         preprocess_dataset(args.model_config, data_dir=args.data_dir, 
-                           dataset_name=args.dataset_name, dataset_config=args.dataset_config, num_procs=args.num_procs)
+                           dataset_name=args.dataset_name, dataset_config=args.dataset_config, num_procs=args.num_procs, group_texts=args.group_texts)
 
     if args.train_model:
         train(args.data_dir, args.log_dir, args.checkpoint_dir, args.dataset_name,
@@ -347,7 +358,7 @@ def main():
                 report_to=args.report_to, run_name=args.run_name,
                 no_cuda=args.no_cuda, logging_steps=args.logging_steps, save_steps=args.save_steps, eval_steps=args.eval_steps, learning_rate=args.learning_rate,
                 warmup_steps=args.warmup_steps, deepspeed_config=args.deepspeed_config, dynamic_stride=args.dynamic_stride,
-                max_grad_norm=args.max_grad_norm, distill=args.distill,
+                max_grad_norm=args.max_grad_norm, distill=args.distill, group_texts=args.group_texts,
                 binary_embedding=args.binary_embedding, n_positions=args.n_positions, halting_function_spec=args.halting_function_spec, layerwise_attn=args.layerwise_attn
              )
         
