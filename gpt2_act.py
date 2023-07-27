@@ -29,7 +29,7 @@ _TOKENIZER_FOR_DOC = "GPT2Tokenizer"
 
 class GPT2ACTConfig(GPT2Config):
     def __init__(self, act_commitment_cost=1e-3, gradient_checkpointing=False, halting_function_spec=None, layerwise_attn="simple",
-                 local_window_size=None, use_relative_position=False, dynamic_stride=None, 
+                 local_window_size=None, use_relative_position=False, dynamic_stride=None, act_depth=None,
                  teacher=None, lambda_kd=1e-4, temperature_kd=4.0, use_binary_embedding=False,  **kwargs):
         """
         :class:`~transformers.GPT2ACTConfig` is the configuration class to store the configuration of a
@@ -46,6 +46,7 @@ class GPT2ACTConfig(GPT2Config):
             lambda_kd (:obj:`float`, `optional`, defaults to 1e-4):   The weight of the distillation loss.
             temperature_kd (:obj:`float`, `optional`, defaults to 4.0):   The temperature_kd for distillation.
             teacher (:obj:`GPT2LMHeadModel`, `optional`, defaults to :obj:`None`):   The teacher model for distillation.
+            act_depth (:obj:`int`, :obj:`float`, `optional`, defaults to :obj:`None`):   The depth of the ACT model,  if :obj:`NOne`, use n_embed as depth of ACT blocks
             use_binary_embedding (:obj:`bool`, `optional`, defaults to :obj:`False`):   If :obj:`True`, use binary embedding.
             kwargs (:obj:`Dict[str, any]`):   Remaining dictionary of keyword arguments from GPT2Config. 
         """
@@ -60,6 +61,7 @@ class GPT2ACTConfig(GPT2Config):
         self.lambda_kd = lambda_kd
         self.temperature_kd = temperature_kd
         self.teacher = teacher
+        self.act_depth = act_depth
 
         super().__init__(**kwargs)
 
@@ -353,6 +355,23 @@ class GPT2ACTModel(GPT2ACTPreTrainedModel):
 
         self.drop = nn.Dropout(config.embd_pdrop)
         self.ln_f = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
+
+        if config.act_depth is not None:
+            if isinstance(config.act_depth, int):
+                act_depth = config.act_depth
+            elif isinstance(config.act_depth, float):
+                act_depth = int(config.n_embd * config.act_depth)
+            else:
+                raise ValueError("config.act_depth must be int or float")
+
+            self.act_in = nn.Linear(config.n_embd, act_depth)
+            self.act_out = nn.Linear(act_depth, config.n_embd)
+            config = copy.deepcopy(config)
+            config.n_embd = act_depth
+        else:
+            self.act_in = None
+            self.act_out = None
+
         self.act_f = ACTBlock(GPT2Block(config), config.n_layer, config.n_embd, act_commitment_cost=act_commitment_cost, 
                               gradient_checkpointing=gradient_checkpointing, dynamic_stride=config.dynamic_stride, layerwise_attn=config.layerwise_attn)
         self.init_weights()
@@ -514,6 +533,9 @@ class GPT2ACTModel(GPT2ACTPreTrainedModel):
             if isinstance(head_mask, torch.Tensor):
                 head_mask = head_mask.to(hidden_states.device)
 
+        if self.act_in is not None:
+            hidden_states = self.act_in(hidden_states)
+
         outputs = self.act_f(hidden_states,
                                 past_key_values=past_key_values,
                                 head_mask=head_mask,
@@ -524,6 +546,9 @@ class GPT2ACTModel(GPT2ACTPreTrainedModel):
                                 output_attentions=output_attentions)
 
         hidden_states, presents, all_hidden_states, all_self_attentions, all_cross_attentions, act_loss, ponder_cost  = outputs
+
+        if self.act_out is not None:
+            hidden_states = self.act_out(hidden_states)
 
         # Model Parallel: If it's the last layer for that device, put things on the next device
         if self.model_parallel:

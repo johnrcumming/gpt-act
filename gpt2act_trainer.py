@@ -126,7 +126,7 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
           push_to_hub_model_id=None, push_to_hub_organization=None, push_to_hub_token=None,
           report_to="all", run_name=None, no_cuda=False, logging_steps=10, save_steps=500, eval_steps=0, warmup_steps=5000, learning_rate=1e-5,
           deepspeed_config=None, dynamic_stride=None, distill=False,
-          binary_embedding=False, n_positions=1024, halting_function_spec=None, layerwise_attn="simple", group_texts=True):    
+          binary_embedding=False, n_positions=1024, halting_function_spec=None, layerwise_attn="simple", group_texts=True, act_depth=None):    
     """Train a GPT2ACT model on a dataset."""
 
     wandb.init(project='gpt2act', name=run_name)
@@ -159,11 +159,9 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
                            use_binary_embedding=binary_embedding,
                            halting_function_spec=halting_function_spec,
                            layerwise_attn=layerwise_attn,
+                           act_depth=act_depth,
                            **gpt2_config.to_dict())
     
-    config.n_embd = 3 * config.n_embd // 2
-
-
     if distill:
         model = GPT2ACTDistilation(config)
     else:
@@ -337,10 +335,22 @@ def main():
     parser.add_argument('--run_name', type=str, default=None, help='A descriptor for the run. Typically used for wandb logging.')
 
     parser.add_argument('--halting_function_spec', type=str, default=None, help='Halting Function Spec.')
-    parser.add_argument('--layerwise_attn', type=str, default=None, choices=['simple', 'mha', 'sha'], help='Set Layerwise Attention.')
+    parser.add_argument('--layerwise_attn', type=str, default='simple', choices=['simple', 'mha', 'sha'], help='Set Layerwise Attention.')
 
     parser.add_argument('--no_group_texts', dest='group_texts', default=True, action='store_false', help='Disable Text Grouping')
+
+    parser.add_argument('--act_depth_factor', type=float, default=None, help='ACT Depth Factor.')
+    parser.add_argument('--act_depth', type=int, default=None, help='ACT Depth.')
+
+
     args = parser.parse_args()
+    
+    if args.act_depth_factor is not None:
+        act_depth = args.act_depth_factor
+    elif args.act_depth is not None:
+        act_depth = args.act_depth
+    else:
+        act_depth = None
 
     if args.preprocess_dataset:
         preprocess_dataset(args.model_config, data_dir=args.data_dir, 
@@ -358,8 +368,9 @@ def main():
                 report_to=args.report_to, run_name=args.run_name,
                 no_cuda=args.no_cuda, logging_steps=args.logging_steps, save_steps=args.save_steps, eval_steps=args.eval_steps, learning_rate=args.learning_rate,
                 warmup_steps=args.warmup_steps, deepspeed_config=args.deepspeed_config, dynamic_stride=args.dynamic_stride,
-                max_grad_norm=args.max_grad_norm, distill=args.distill, group_texts=args.group_texts,
-                binary_embedding=args.binary_embedding, n_positions=args.n_positions, halting_function_spec=args.halting_function_spec, layerwise_attn=args.layerwise_attn
+                max_grad_norm=args.max_grad_norm, distill=args.distill, group_texts=args.group_texts, 
+                binary_embedding=args.binary_embedding, n_positions=args.n_positions, halting_function_spec=args.halting_function_spec, layerwise_attn=args.layerwise_attn,
+                act_depth = act_depth
              )
         
     if args.calculate_perplexity:
