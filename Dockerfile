@@ -40,6 +40,9 @@ RUN git clone git@github.com:johnrcumming/gpt-act.git
 
 RUN chmod +x gpt-act/launch.sh
 
+# set wandb variables
+ENV WANDB_LOG_MODEL="end"
+
 EXPOSE 8888
 EXPOSE 6006
 EXPOSE 22
