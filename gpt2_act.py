@@ -30,7 +30,12 @@ _TOKENIZER_FOR_DOC = "GPT2Tokenizer"
 class GPT2ACTConfig(GPT2Config):
     def __init__(self, act_commitment_cost=1e-3, gradient_checkpointing=False, halting_function_spec=None, layerwise_attn="simple",
                  local_window_size=None, use_relative_position=False, dynamic_stride=None, act_depth=None,
-                 teacher=None, lambda_kd=1e-4, temperature_kd=4.0, use_binary_embedding=False,  **kwargs):
+                 teacher=None, lambda_kd=1e-4, temperature_kd=4.0, use_binary_embedding=False, 
+                 num_experts=4,
+                 top_k=2,
+                 expert_capacity=None,
+                 router_jitter_noise=0.0,
+                 **kwargs):
         """
         :class:`~transformers.GPT2ACTConfig` is the configuration class to store the configuration of a
         :class:`~transformers.GPT2ACTModel`.
@@ -48,6 +53,10 @@ class GPT2ACTConfig(GPT2Config):
             teacher (:obj:`GPT2LMHeadModel`, `optional`, defaults to :obj:`None`):   The teacher model for distillation.
             act_depth (:obj:`int`, :obj:`float`, `optional`, defaults to :obj:`None`):   The depth of the ACT model,  if :obj:`NOne`, use n_embed as depth of ACT blocks
             use_binary_embedding (:obj:`bool`, `optional`, defaults to :obj:`False`):   If :obj:`True`, use binary embedding.
+            num_experts (:obj:`int`, `optional`, defaults to 4):   The number of experts.
+            top_k (:obj:`int`, `optional`, defaults to 2):   The number of top experts.
+            expert_capacity (:obj:`int`, `optional`, defaults to :obj:`None`):   The capacity of each expert.
+            router_jitter_noise (:obj:`float`, `optional`, defaults to 0.0):   The jitter noise of the router.
             kwargs (:obj:`Dict[str, any]`):   Remaining dictionary of keyword arguments from GPT2Config. 
         """
         self.act_commitment_cost = act_commitment_cost
@@ -62,6 +71,10 @@ class GPT2ACTConfig(GPT2Config):
         self.temperature_kd = temperature_kd
         self.teacher = teacher
         self.act_depth = act_depth
+        self.num_experts = num_experts
+        self.top_k = top_k
+        self.expert_capacity = expert_capacity
+        self.router_jitter_noise = router_jitter_noise
 
         super().__init__(**kwargs)
 
@@ -372,8 +385,18 @@ class GPT2ACTModel(GPT2ACTPreTrainedModel):
             self.act_in = None
             self.act_out = None
 
-        self.act_f = ACTBlock(GPT2Block(config), config.n_layer, config.n_embd, act_commitment_cost=act_commitment_cost, 
-                              gradient_checkpointing=gradient_checkpointing, dynamic_stride=config.dynamic_stride, layerwise_attn=config.layerwise_attn)
+        self.act_f = MoEACTBlock(
+            GPT2Block(config), 
+            config.n_layer, 
+            config.n_embd, 
+            num_experts=config.num_experts,  # New config parameter
+            top_k=config.top_k,  # New config parameter
+            act_commitment_cost=act_commitment_cost,
+            gradient_checkpointing=gradient_checkpointing, 
+            dynamic_stride=config.dynamic_stride, 
+            layerwise_attn=config.layerwise_attn
+        )
+        
         self.init_weights()
         # Model parallel
         self.model_parallel = False
@@ -453,6 +476,7 @@ class GPT2ACTModel(GPT2ACTPreTrainedModel):
         elif input_ids is not None:
             input_shape = input_ids.size()
             input_ids = input_ids.view(-1, input_shape[-1])
+
             batch_size = input_ids.shape[0]
         elif inputs_embeds is not None:
             input_shape = inputs_embeds.size()[:-1]
