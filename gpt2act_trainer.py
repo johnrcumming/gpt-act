@@ -323,7 +323,7 @@ def main():
     parser.add_argument('--stream_dataset', default=False, action='store_true', help='Stream Dataset.')
     parser.add_argument('--no_fp16', dest='fp16', default=True, action='store_false', help='FP16 Training.')
     parser.add_argument('--max_steps', type=int, default=-1, help='Number of train steps for streaming_datasets.')
-    parser.add_argument('--act_commitment_cost', type=float, default=1e-3, help='ACT Loss commitmemt cost.')
+    parser.add_argument('--act_commitment_cost', type=float, default=1e-4, help='ACT Loss commitmemt cost.')
     parser.add_argument('--gradient_checkpointing', default=False, action='store_true', help='Enable Gradient Chackpointing.')
     parser.add_argument('--no_cuda', default=False, action='store_true', help='Disable CUDA.')
 
