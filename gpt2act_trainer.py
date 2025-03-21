@@ -342,6 +342,11 @@ def main():
     parser.add_argument('--act_depth_factor', type=float, default=None, help='ACT Depth Factor.')
     parser.add_argument('--act_depth', type=int, default=None, help='ACT Depth.')
 
+    parser.add_argument('--num_experts', type=int, default=4, help='Number of Experts.')
+    parser.add_argument('--top_k', type=int, default=2, help='Top K.')
+    parser.add_argument('--expert_capacity', type=int, default=None, help='Expert Capacity.')
+    parser.add_argument('--router_jitter_noise', type=float, default=0.0, help='Router Jitter Noise.')
+
 
     args = parser.parse_args()
     
@@ -370,7 +375,11 @@ def main():
                 warmup_steps=args.warmup_steps, deepspeed_config=args.deepspeed_config, dynamic_stride=args.dynamic_stride,
                 max_grad_norm=args.max_grad_norm, distill=args.distill, group_texts=args.group_texts, 
                 binary_embedding=args.binary_embedding, n_positions=args.n_positions, halting_function_spec=args.halting_function_spec, layerwise_attn=args.layerwise_attn,
-                act_depth = act_depth
+                act_depth = act_depth,
+                num_experts=args.num_experts,
+                top_k=args.top_k,
+                expert_capacity=args.expert_capacity,
+                router_jitter_noise=args.router_jitter_noise
              )
         
     if args.calculate_perplexity:
