@@ -17,6 +17,38 @@ from transformers import Trainer, TrainingArguments
 
 from gpt2_act import GPT2ACTLMHeadModel, GPT2ACTConfig, GPT2ACTDistilation
 
+class GPT2ACTTrainer(Trainer):
+    def save_model(self, output_dir, _internal_call=False, **kwargs):
+        """
+        Override save_model to handle safe_serialization parameter
+        """
+        from transformers.trainer import TRAINING_ARGS_NAME
+        
+        os.makedirs(output_dir, exist_ok=True)
+        torch.save(self.args, os.path.join(output_dir, TRAINING_ARGS_NAME))
+        
+        # Save the model, ensuring we use safe_serialization=False
+        if self.model is not None:
+            if hasattr(self.model, 'save_pretrained'):
+                # If it's our custom model with the save_pretrained method
+                self.model.save_pretrained(output_dir, safe_serialization=False)
+            else:
+                # Fallback to normal save
+                state_dict = self.model.state_dict()
+                torch.save(state_dict, os.path.join(output_dir, "pytorch_model.bin"))
+                
+        # Save the tokenizer if needed
+        if self.tokenizer is not None and self.is_world_process_zero():
+            self.tokenizer.save_pretrained(output_dir)
+            
+        # Save the optimizer and scheduler states
+        if self.state is not None:
+            # In case of crash, the optimizer state might not be available
+            if hasattr(self.state, 'optimizer') and self.state.optimizer is not None:
+                torch.save(self.state.optimizer, os.path.join(output_dir, "optimizer.pt"))
+            if hasattr(self.state, 'lr_scheduler') and self.state.lr_scheduler is not None:
+                torch.save(self.state.lr_scheduler, os.path.join(output_dir, "scheduler.pt"))
+
 def GroupTexts(block_size, tokenizer=None, field='text'):
     def group_texts_fn(examples):
         if tokenizer is not None:
@@ -126,10 +158,11 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
           push_to_hub_model_id=None, push_to_hub_organization=None, push_to_hub_token=None,
           report_to="all", run_name=None, no_cuda=False, logging_steps=10, save_steps=500, eval_steps=0, warmup_steps=5000, learning_rate=1e-5,
           deepspeed_config=None, dynamic_stride=None, distill=False,
-          binary_embedding=False, n_positions=1024, halting_function_spec=None, layerwise_attn="simple", group_texts=True, act_depth=None):    
+          binary_embedding=False, n_positions=1024, halting_function_spec=None, layerwise_attn="simple", group_texts=True, act_depth=None,
+          num_experts=4, top_k=2, expert_capacity=None, router_jitter_noise=0.0):    
     """Train a GPT2ACT model on a dataset."""
-
-    wandb.init(project='gpt2act', name=run_name)
+    if run_name is not None:
+        wandb.init(project='gpt2act', name=run_name)
 
     if verbose:
         transformers.utils.logging.set_verbosity_info()
@@ -228,7 +261,7 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
     if parallelize:
         model.parallelize()
     
-    trainer = Trainer(
+    trainer = GPT2ACTTrainer(
         model=model,                         # the instantiated 🤗 Transformers model to be trained
         args=training_args,                  # training arguments, defined above
         train_dataset=train_dataset,         # training dataset
@@ -236,13 +269,18 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
     )
 
     try:
-        trainer.train(checkpoint)
-        trainer.save_model(os.path.join(training_args.output_dir, 'best'))
+        trainer.train(resume_from_checkpoint=checkpoint)
+        trainer.save_model(os.path.join(training_args.output_dir, 'best'), safe_serialization=False)
     except KeyboardInterrupt:
-        trainer.save_model(os.path.join(training_args.output_dir, 'interrupt'))
+        trainer.save_model(os.path.join(training_args.output_dir, 'interrupt'), safe_serialization=False)
     except Exception as e:
         traceback.print_exc()
-        trainer.save_model(os.path.join(training_args.output_dir, 'crash'))
+        trainer.save_model(os.path.join(training_args.output_dir, 'crash'), safe_serialization=False)
+        print('Error', e)
+        
+    if args.calculate_perplexity:
+        calculate_perplexity(data_dir=args.data_dir, dataset_name=args.dataset_name, checkpoint=args.checkpoint, 
+                             num_procs=args.num_procs, verbose=args.verbose, no_cuda=args.no_cuda, fp16=args.fp16)
 
 def calculate_perplexity(data_dir='data', dataset_name='wikitext', model_config='gpt2', checkpoint=None, num_procs=4, verbose=True, no_cuda=True, fp16=True):
     if verbose:
@@ -385,5 +423,6 @@ def main():
     if args.calculate_perplexity:
         calculate_perplexity(data_dir=args.data_dir, dataset_name=args.dataset_name, checkpoint=args.checkpoint, 
                              num_procs=args.num_procs, verbose=args.verbose, no_cuda=args.no_cuda, fp16=args.fp16)
+
 if __name__ == "__main__":
     main()

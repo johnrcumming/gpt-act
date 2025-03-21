@@ -1,4 +1,3 @@
-import math
 import torch
 import torch.nn as nn
 import copy
@@ -20,8 +19,9 @@ from transformers.modeling_outputs import ModelOutput
 
 from transformers import GPT2LMHeadModel
 
-from embeddings import BinaryPositionEmbedding, RelativePositionEmbedding
-from act import ACTBlock
+from embeddings import BinaryPositionEmbedding
+from moe import MoEACTBlock
+
 
 _CHECKPOINT_FOR_DOC = "gpt2act"
 _CONFIG_FOR_DOC = "GPT2ACTConfig"
@@ -651,6 +651,23 @@ class GPT2ACTLMHeadModel(GPT2ACTPreTrainedModel):
 
     def set_output_embeddings(self, new_embeddings):
         self.lm_head = new_embeddings
+        
+    def save_pretrained(self, save_directory, safe_serialization=False, **kwargs):
+        """
+        Save a model with its configuration file to a directory, so that it can be re-loaded using the
+        `from_pretrained` class method.
+        
+        Arguments:
+            save_directory (`str`):
+                Directory to which to save. Will be created if it doesn't exist.
+            safe_serialization (`bool`, *optional*, defaults to `False`):
+                Whether to save the model using `safetensors` or the traditional PyTorch way with `pickle`.
+                Set to False to address shared tensor issue between lm_head.weight and transformer.wte.weight.
+            **kwargs:
+                Additional key word arguments passed along to the `push_to_hub` method.
+        """
+        # Setting safe_serialization=False to fix the error with shared tensors
+        return super().save_pretrained(save_directory, safe_serialization=False, **kwargs)
 
     def prepare_inputs_for_generation(self, input_ids, past=None, **kwargs):
         token_type_ids = kwargs.get("token_type_ids", None)
@@ -819,11 +836,33 @@ class GPT2ACTDistilation(GPT2ACTPreTrainedModel):
 
 
     def to_device(self, device="cpu", **kwargs):
+        """ Move teacher and student to device via to() method """
+        self.teacher.to(device, **kwargs)
+        self.student.to(device, **kwargs)
+        
         if self.model_parallel:
             return {k: kwargs[k].to(device) if kwargs[k] is not None else None for k in kwargs}
         else:
             return kwargs
+        
+    def save_pretrained(self, save_directory, safe_serialization=False, **kwargs):
+        """
+        Save a model with its configuration file to a directory, so that it can be re-loaded using the
+        `from_pretrained` class method.
+        
+        Arguments:
+            save_directory (`str`):
+                Directory to which to save. Will be created if it doesn't exist.
+            safe_serialization (`bool`, *optional*, defaults to `False`):
+                Whether to save the model using `safetensors` or the traditional PyTorch way with `pickle`.
+                Set to False to address shared tensor issue between lm_head.weight and transformer.wte.weight.
+            **kwargs:
+                Additional key word arguments passed along to the `push_to_hub` method.
+        """
+        # Setting safe_serialization=False to fix the error with shared tensors
+        return self.student.save_pretrained(save_directory, safe_serialization=False, **kwargs)
 
+    @add_start_docstrings_to_model_forward(GPT2_INPUTS_DOCSTRING)
     def forward(
         self,
         input_ids=None,

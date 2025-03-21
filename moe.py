@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import copy
 
 from act import ACTBlock
@@ -7,6 +8,10 @@ from act import ACTBlock
 class MoEACTBlock(nn.Module):
     def __init__(self, block, layers, hiddens, num_experts=4, top_k=2, **act_kwargs):
         super().__init__()
+        
+        # Ensure top_k is never greater than num_experts
+        self.num_experts = num_experts
+        self.top_k = min(top_k, num_experts)
         
         # Create multiple expert ACT blocks
         self.experts = nn.ModuleList([
@@ -16,8 +21,6 @@ class MoEACTBlock(nn.Module):
         
         # Router network
         self.router = nn.Linear(hiddens, num_experts)
-        self.top_k = top_k
-        self.num_experts = num_experts
         
     def forward(self, hidden_states, **kwargs):
         batch_size, seq_len, hidden_size = hidden_states.shape
@@ -56,7 +59,11 @@ class MoEACTBlock(nn.Module):
             
             for k in range(self.top_k):
                 mask = (top_k_indices[..., k] == expert_idx)
-                expert_weights[mask] = top_k_weights[mask, k].unsqueeze(-1)
+                weight_indices = torch.nonzero(mask)
+                if weight_indices.size(0) > 0:  # Check if there are any tokens routed to this expert
+                    batch_indices = weight_indices[:, 0]
+                    seq_indices = weight_indices[:, 1]
+                    expert_weights[batch_indices, seq_indices] = top_k_weights[batch_indices, seq_indices, k].unsqueeze(-1)
             
             # Only process tokens assigned to this expert
             if expert_mask.any():
@@ -74,8 +81,14 @@ class MoEACTBlock(nn.Module):
                 else:
                     expert_hidden = expert_output
                 
-                # Weight and combine the expert outputs
-                combined_output = combined_output + expert_hidden * expert_weights
+                # Weight and combine the expert outputs - ensure tensors have compatible shapes
+                if isinstance(expert_hidden, torch.Tensor):
+                    combined_output = combined_output + expert_hidden * expert_weights
+                else:
+                    # Handle the case where expert_hidden might be a list or tuple
+                    if isinstance(expert_hidden, (list, tuple)) and len(expert_hidden) > 0 and isinstance(expert_hidden[0], torch.Tensor):
+                        # Use the first tensor if it's a list/tuple of tensors
+                        combined_output = combined_output + expert_hidden[0] * expert_weights
         
         # Return combined output and losses
         return combined_output, act_loss, ponder_cost
