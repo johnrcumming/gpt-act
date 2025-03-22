@@ -1,40 +1,46 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+
 import math
 
 class BinaryPositionEmbedding(nn.Module):
-    def __init__(self, n_positions, d_model):
+    def __init__(self, n_positions, d_model, debug=False):
         super(BinaryPositionEmbedding, self).__init__()
 
         self.n_bits = math.ceil(math.log2(n_positions))
         self.d_model = d_model
-        self.embedding = nn.Embedding(self.n_bits, d_model)
+        self.embedding = nn.Embedding(self.n_bits+1, d_model)
 
         # Normalize Embedding Parameters
         self.embedding.weight.data = F.normalize(self.embedding.weight.data, dim=1, p=2)
 
+        # Set Weight Values for 0 to 0 and make it non-trainable
+        self.embedding.weight.data[0] = 0
+        self.embedding.weight.data[0].requires_grad = False
+
+        if debug:
+            # set debugging weights to binary values
+            for i in range(0, self.n_bits):
+                self.embedding.weight.data[i] = torch.tensor(1<<i, dtype=torch.float32)
+                self.embedding.weight.data[i].requires_grad = False
+
+
     def forward(self, x):
         x_shape = x.shape
+
         x = x.flatten()
 
         # create a tensor with shape (n_bits, x.shape[0])
         bit_indices = torch.arange(self.n_bits, device=x.device).unsqueeze(1).repeat(1, x.shape[0])
 
         # create a tensor with shape (n_bits, x.shape[0]) where each column is the binary representation of a position
-        binary_repr = x.unsqueeze(0) & (1 << bit_indices)
+        binary_repr = (x.unsqueeze(0) & (1 << bit_indices)).T
 
-        # select the active bits for each position
-        active_bits = torch.nonzero(binary_repr).T[1]
+        embeddings = torch.stack([ torch.sum(self.embedding(torch.nonzero(v).squeeze(-1)), dim=0) for v in binary_repr ])
 
-        # calculate embeddings and sum them for each position
-        embeddings = self.embedding(active_bits)
-        embeddings = embeddings.split_with_sizes(x_shape.numel(), dim=0)
-        embeddings = torch.stack([torch.sum(e, dim=0) for e in embeddings])
-
-        embeddings = embeddings.reshape(*x_shape, self.d_model)
         return embeddings
-
-
+    
 class BinaryRelativePositionEmbedding(torch.nn.Module):
     """
     This module produces relative position embeddings given a position index tensor.

@@ -309,7 +309,7 @@ def main():
     parser.add_argument('--save_steps', type=int, default=500, help='Save checkpoint every n steps.')
     parser.add_argument('--eval_steps', type=int, default=0, help='Evaluate every n steps, default evaluate at epoch.')
     parser.add_argument('--warmup_steps', type=int, default=1000, help='Optimizer Warmup steps.')
-    parser.add_argument('--learning_rate', type=float, default=1e-3, help='Optimizer Learning Rate.')
+    parser.add_argument('--learning_rate', type=float, default=1e-5, help='Optimizer Learning Rate.')
 
     parser.add_argument('--binary_embedding', default=False, action='store_true', help='Use Experimental Binary Embedding.')
     parser.add_argument('--n_positions', type=int, default=1024, help='n_positions - context length.')
