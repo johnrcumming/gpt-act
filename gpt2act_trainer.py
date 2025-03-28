@@ -159,7 +159,7 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
           report_to="all", run_name=None, no_cuda=False, logging_steps=10, save_steps=500, eval_steps=0, warmup_steps=5000, learning_rate=1e-5,
           deepspeed_config=None, dynamic_stride=None, distill=False,
           binary_embedding=False, n_positions=1024, halting_function_spec=None, layerwise_attn="simple", group_texts=True, act_depth=None,
-          num_experts=4, top_k=2, expert_capacity=None, router_jitter_noise=0.0):    
+          num_experts=4, experts_top_k=2, expert_capacity=None, router_jitter_noise=0.0):    
     """Train a GPT2ACT model on a dataset."""
     if run_name is not None:
         wandb.init(project='gpt2act', name=run_name)
@@ -193,6 +193,10 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
                            halting_function_spec=halting_function_spec,
                            layerwise_attn=layerwise_attn,
                            act_depth=act_depth,
+                           num_experts=num_experts,
+                           experts_top_k=experts_top_k,
+                           expert_capacity=expert_capacity,
+                           router_jitter_noise=router_jitter_noise,
                            **gpt2_config.to_dict())
     
     if distill:
@@ -277,11 +281,8 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
         traceback.print_exc()
         trainer.save_model(os.path.join(training_args.output_dir, 'crash'), safe_serialization=False)
         print('Error', e)
-        
-    if args.calculate_perplexity:
-        calculate_perplexity(data_dir=args.data_dir, dataset_name=args.dataset_name, checkpoint=args.checkpoint, 
-                             num_procs=args.num_procs, verbose=args.verbose, no_cuda=args.no_cuda, fp16=args.fp16)
 
+        
 def calculate_perplexity(data_dir='data', dataset_name='wikitext', model_config='gpt2', checkpoint=None, num_procs=4, verbose=True, no_cuda=True, fp16=True):
     if verbose:
         transformers.utils.logging.set_verbosity_info()
@@ -381,7 +382,7 @@ def main():
     parser.add_argument('--act_depth', type=int, default=None, help='ACT Depth.')
 
     parser.add_argument('--num_experts', type=int, default=4, help='Number of Experts.')
-    parser.add_argument('--top_k', type=int, default=2, help='Top K.')
+    parser.add_argument('--experts_top_k', type=int, default=2, help='Experts Top K.')
     parser.add_argument('--expert_capacity', type=int, default=None, help='Expert Capacity.')
     parser.add_argument('--router_jitter_noise', type=float, default=0.0, help='Router Jitter Noise.')
 
@@ -415,7 +416,7 @@ def main():
                 binary_embedding=args.binary_embedding, n_positions=args.n_positions, halting_function_spec=args.halting_function_spec, layerwise_attn=args.layerwise_attn,
                 act_depth = act_depth,
                 num_experts=args.num_experts,
-                top_k=args.top_k,
+                experts_top_k=args.experts_top_k,
                 expert_capacity=args.expert_capacity,
                 router_jitter_noise=args.router_jitter_noise
              )

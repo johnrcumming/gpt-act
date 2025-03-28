@@ -32,7 +32,7 @@ class GPT2ACTConfig(GPT2Config):
                  local_window_size=None, use_relative_position=False, dynamic_stride=None, act_depth=None,
                  teacher=None, lambda_kd=1e-4, temperature_kd=4.0, use_binary_embedding=False, 
                  num_experts=4,
-                 top_k=2,
+                 experts_top_k=2,
                  expert_capacity=None,
                  router_jitter_noise=0.0,
                  **kwargs):
@@ -54,7 +54,7 @@ class GPT2ACTConfig(GPT2Config):
             act_depth (:obj:`int`, :obj:`float`, `optional`, defaults to :obj:`None`):   The depth of the ACT model,  if :obj:`NOne`, use n_embed as depth of ACT blocks
             use_binary_embedding (:obj:`bool`, `optional`, defaults to :obj:`False`):   If :obj:`True`, use binary embedding.
             num_experts (:obj:`int`, `optional`, defaults to 4):   The number of experts.
-            top_k (:obj:`int`, `optional`, defaults to 2):   The number of top experts.
+            experts_top_k (:obj:`int`, `optional`, defaults to 2):   The number of top experts.
             expert_capacity (:obj:`int`, `optional`, defaults to :obj:`None`):   The capacity of each expert.
             router_jitter_noise (:obj:`float`, `optional`, defaults to 0.0):   The jitter noise of the router.
             kwargs (:obj:`Dict[str, any]`):   Remaining dictionary of keyword arguments from GPT2Config. 
@@ -72,7 +72,7 @@ class GPT2ACTConfig(GPT2Config):
         self.teacher = teacher
         self.act_depth = act_depth
         self.num_experts = num_experts
-        self.top_k = top_k
+        self.experts_top_k = experts_top_k
         self.expert_capacity = expert_capacity
         self.router_jitter_noise = router_jitter_noise
 
@@ -390,7 +390,7 @@ class GPT2ACTModel(GPT2ACTPreTrainedModel):
             config.n_layer, 
             config.n_embd, 
             num_experts=config.num_experts,  # New config parameter
-            top_k=config.top_k,  # New config parameter
+            top_k=config.experts_top_k,  # New config parameter
             act_commitment_cost=act_commitment_cost,
             gradient_checkpointing=gradient_checkpointing, 
             dynamic_stride=config.dynamic_stride, 
@@ -421,8 +421,8 @@ class GPT2ACTModel(GPT2ACTPreTrainedModel):
     def deparallelize(self):
         self.model_parallel = False
         self.device_map = None
-        self.first_device = "cpu"
-        self.last_device = "cpu"
+        self.first_device="cpu"
+        self.last_device="cpu"
         self.wte = self.wte.to(self.first_device)
         self.wpe = self.wpe.to(self.first_device)
         self.ln_f = self.ln_f.to(self.first_device)
@@ -569,38 +569,56 @@ class GPT2ACTModel(GPT2ACTPreTrainedModel):
                                 use_cache=use_cache,
                                 output_attentions=output_attentions)
 
-        hidden_states, presents, all_hidden_states, all_self_attentions, all_cross_attentions, act_loss, ponder_cost  = outputs
+        if len(outputs) == 7:
+            hidden_states, presents, all_hidden_states, all_self_attentions, all_cross_attentions, act_loss, ponder_cost  = outputs
 
-        if self.act_out is not None:
-            hidden_states = self.act_out(hidden_states)
+            if self.act_out is not None:
+                hidden_states = self.act_out(hidden_states)
 
-        # Model Parallel: If it's the last layer for that device, put things on the next device
-        if self.model_parallel:
-            hidden_states = hidden_states.to(self.first_device)
-            act_loss = act_loss.to(self.first_device)
-            ponder_cost = ponder_cost.to(self.first_device)
+            # Model Parallel: If it's the last layer for that device, put things on the next device
+            if self.model_parallel:
+                hidden_states = hidden_states.to(self.first_device)
+                act_loss = act_loss.to(self.first_device)
+                ponder_cost = ponder_cost.to(self.first_device)
 
 
-        hidden_states = self.ln_f(hidden_states)
+            hidden_states = self.ln_f(hidden_states)
 
-        hidden_states = hidden_states.view(*output_shape)
-        
-        # Add last hidden state
-        if output_hidden_states:
-            all_hidden_states = all_hidden_states + (hidden_states,)
+            hidden_states = hidden_states.view(*output_shape)
+            
+            # Add last hidden state
+            if output_hidden_states:
+                all_hidden_states = all_hidden_states + (hidden_states,)
 
-        if not return_dict:
-            return tuple(v for v in [hidden_states, presents, all_hidden_states, all_self_attentions, act_loss, ponder_cost] if v is not None)
+            if not return_dict:
+                return tuple(v for v in [hidden_states, presents, all_hidden_states, all_self_attentions, act_loss, ponder_cost] if v is not None)
 
-        return ACTModelOutputWithPastAndCrossAttentions(
-            last_hidden_state=hidden_states,
-            past_key_values=presents,
-            hidden_states=all_hidden_states,
-            attentions=all_self_attentions,
-            cross_attentions=all_cross_attentions,
-            act_loss=act_loss,
-            ponder_cost=ponder_cost,
-        )
+            return ACTModelOutputWithPastAndCrossAttentions(
+                last_hidden_state=hidden_states,
+                past_key_values=presents,
+                hidden_states=all_hidden_states,
+                attentions=all_self_attentions,
+                cross_attentions=all_cross_attentions,
+                act_loss=act_loss,
+                ponder_cost=ponder_cost,
+            )
+        elif len(outputs) == 3:
+            combined_output, act_loss, ponder_cost = outputs
+            # Properly format output for Hugging Face transformers compatibility
+            if not return_dict:
+                return tuple(v for v in [combined_output, None, None, None, None, act_loss, ponder_cost] if v is not None)
+            
+            return ACTModelOutputWithPastAndCrossAttentions(
+                last_hidden_state=combined_output,
+                past_key_values=None,
+                hidden_states=None,
+                attentions=None,
+                cross_attentions=None,
+                act_loss=act_loss,
+                ponder_cost=ponder_cost,
+            )
+        else:
+            raise ValueError(f"Unexpected number of outputs: {len(outputs)}")
     
 class GPT2ACTLMHeadModel(GPT2ACTPreTrainedModel):
     _keys_to_ignore_on_load_missing = [r"h\.\d+\.attn\.masked_bias", r"lm_head\.weight"]
