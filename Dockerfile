@@ -36,7 +36,7 @@ RUN ssh-keyscan github.com >> /root/.ssh/known_hosts
 RUN git config --global user.name "John Cumming"
 RUN git config --global user.email "johnrcumming@gmail.com"
 
-RUN git clone -v git@github.com:johnrcumming/gpt-act.git
+RUN git clone -b moe_cascade git@github.com:johnrcumming/gpt-act.git
 
 RUN chmod +x gpt-act/launch.sh
 
