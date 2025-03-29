@@ -1,0 +1,15 @@
+{   "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python Debugger: Current File",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "args": ["--train_model", "--run_name", "moerun1", "--train_batch_size", "8 "],
+            "env": {
+                "KMP_DUPLICATE_LIB_OK": "TRUE"
+            }
+        }
+    ]
+}

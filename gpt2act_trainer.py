@@ -17,6 +17,38 @@ from transformers import Trainer, TrainingArguments
 
 from gpt2_act import GPT2ACTLMHeadModel, GPT2ACTConfig, GPT2ACTDistilation
 
+class GPT2ACTTrainer(Trainer):
+    def save_model(self, output_dir, _internal_call=False, **kwargs):
+        """
+        Override save_model to handle safe_serialization parameter
+        """
+        from transformers.trainer import TRAINING_ARGS_NAME
+        
+        os.makedirs(output_dir, exist_ok=True)
+        torch.save(self.args, os.path.join(output_dir, TRAINING_ARGS_NAME))
+        
+        # Save the model, ensuring we use safe_serialization=False
+        if self.model is not None:
+            if hasattr(self.model, 'save_pretrained'):
+                # If it's our custom model with the save_pretrained method
+                self.model.save_pretrained(output_dir, safe_serialization=False)
+            else:
+                # Fallback to normal save
+                state_dict = self.model.state_dict()
+                torch.save(state_dict, os.path.join(output_dir, "pytorch_model.bin"))
+                
+        # Save the tokenizer if needed
+        if self.tokenizer is not None and self.is_world_process_zero():
+            self.tokenizer.save_pretrained(output_dir)
+            
+        # Save the optimizer and scheduler states
+        if self.state is not None:
+            # In case of crash, the optimizer state might not be available
+            if hasattr(self.state, 'optimizer') and self.state.optimizer is not None:
+                torch.save(self.state.optimizer, os.path.join(output_dir, "optimizer.pt"))
+            if hasattr(self.state, 'lr_scheduler') and self.state.lr_scheduler is not None:
+                torch.save(self.state.lr_scheduler, os.path.join(output_dir, "scheduler.pt"))
+
 def GroupTexts(block_size, tokenizer=None, field='text'):
     def group_texts_fn(examples):
         if tokenizer is not None:
@@ -126,10 +158,11 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
           push_to_hub_model_id=None, push_to_hub_organization=None, push_to_hub_token=None,
           report_to="all", run_name=None, no_cuda=False, logging_steps=10, save_steps=500, eval_steps=0, warmup_steps=5000, learning_rate=1e-5,
           deepspeed_config=None, dynamic_stride=None, distill=False,
-          binary_embedding=False, n_positions=1024, halting_function_spec=None, layerwise_attn="simple", group_texts=True, act_depth=None):    
+          binary_embedding=False, n_positions=1024, halting_function_spec=None, layerwise_attn="simple", group_texts=True, act_depth=None,
+          num_experts=4, experts_top_k=2, expert_capacity=None, router_jitter_noise=0.0):    
     """Train a GPT2ACT model on a dataset."""
-
-    wandb.init(project='gpt2act', name=run_name)
+    if run_name is not None:
+        wandb.init(project='gpt2act', name=run_name)
 
     if verbose:
         transformers.utils.logging.set_verbosity_info()
@@ -160,6 +193,10 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
                            halting_function_spec=halting_function_spec,
                            layerwise_attn=layerwise_attn,
                            act_depth=act_depth,
+                           num_experts=num_experts,
+                           experts_top_k=experts_top_k,
+                           expert_capacity=expert_capacity,
+                           router_jitter_noise=router_jitter_noise,
                            **gpt2_config.to_dict())
     
     if distill:
@@ -228,7 +265,7 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
     if parallelize:
         model.parallelize()
     
-    trainer = Trainer(
+    trainer = GPT2ACTTrainer(
         model=model,                         # the instantiated 🤗 Transformers model to be trained
         args=training_args,                  # training arguments, defined above
         train_dataset=train_dataset,         # training dataset
@@ -236,14 +273,16 @@ def train(data_dir, base_logging_dir, checkpoint_dir, dataset_name,
     )
 
     try:
-        trainer.train(checkpoint)
-        trainer.save_model(os.path.join(training_args.output_dir, 'best'))
+        trainer.train(resume_from_checkpoint=checkpoint)
+        trainer.save_model(os.path.join(training_args.output_dir, 'best'), safe_serialization=False)
     except KeyboardInterrupt:
-        trainer.save_model(os.path.join(training_args.output_dir, 'interrupt'))
+        trainer.save_model(os.path.join(training_args.output_dir, 'interrupt'), safe_serialization=False)
     except Exception as e:
         traceback.print_exc()
-        trainer.save_model(os.path.join(training_args.output_dir, 'crash'))
+        trainer.save_model(os.path.join(training_args.output_dir, 'crash'), safe_serialization=False)
+        print('Error', e)
 
+        
 def calculate_perplexity(data_dir='data', dataset_name='wikitext', model_config='gpt2', checkpoint=None, num_procs=4, verbose=True, no_cuda=True, fp16=True):
     if verbose:
         transformers.utils.logging.set_verbosity_info()
@@ -308,7 +347,7 @@ def main():
     parser.add_argument('--logging_steps', type=int, default=10, help='Log every n steps')
     parser.add_argument('--save_steps', type=int, default=500, help='Save checkpoint every n steps.')
     parser.add_argument('--eval_steps', type=int, default=0, help='Evaluate every n steps, default evaluate at epoch.')
-    parser.add_argument('--warmup_steps', type=int, default=1000, help='Optimizer Warmup steps.')
+    parser.add_argument('--warmup_steps', type=int, default=250, help='Optimizer Warmup steps.')
     parser.add_argument('--learning_rate', type=float, default=1e-5, help='Optimizer Learning Rate.')
 
     parser.add_argument('--binary_embedding', default=False, action='store_true', help='Use Experimental Binary Embedding.')
@@ -323,7 +362,7 @@ def main():
     parser.add_argument('--stream_dataset', default=False, action='store_true', help='Stream Dataset.')
     parser.add_argument('--no_fp16', dest='fp16', default=True, action='store_false', help='FP16 Training.')
     parser.add_argument('--max_steps', type=int, default=-1, help='Number of train steps for streaming_datasets.')
-    parser.add_argument('--act_commitment_cost', type=float, default=1e-3, help='ACT Loss commitmemt cost.')
+    parser.add_argument('--act_commitment_cost', type=float, default=1e-4, help='ACT Loss commitmemt cost.')
     parser.add_argument('--gradient_checkpointing', default=False, action='store_true', help='Enable Gradient Chackpointing.')
     parser.add_argument('--no_cuda', default=False, action='store_true', help='Disable CUDA.')
 
@@ -341,6 +380,11 @@ def main():
 
     parser.add_argument('--act_depth_factor', type=float, default=None, help='ACT Depth Factor.')
     parser.add_argument('--act_depth', type=int, default=None, help='ACT Depth.')
+
+    parser.add_argument('--num_experts', type=int, default=4, help='Number of Experts.')
+    parser.add_argument('--experts_top_k', type=int, default=2, help='Experts Top K.')
+    parser.add_argument('--expert_capacity', type=int, default=None, help='Expert Capacity.')
+    parser.add_argument('--router_jitter_noise', type=float, default=0.0, help='Router Jitter Noise.')
 
 
     args = parser.parse_args()
@@ -370,11 +414,16 @@ def main():
                 warmup_steps=args.warmup_steps, deepspeed_config=args.deepspeed_config, dynamic_stride=args.dynamic_stride,
                 max_grad_norm=args.max_grad_norm, distill=args.distill, group_texts=args.group_texts, 
                 binary_embedding=args.binary_embedding, n_positions=args.n_positions, halting_function_spec=args.halting_function_spec, layerwise_attn=args.layerwise_attn,
-                act_depth = act_depth
+                act_depth = act_depth,
+                num_experts=args.num_experts,
+                experts_top_k=args.experts_top_k,
+                expert_capacity=args.expert_capacity,
+                router_jitter_noise=args.router_jitter_noise
              )
         
     if args.calculate_perplexity:
         calculate_perplexity(data_dir=args.data_dir, dataset_name=args.dataset_name, checkpoint=args.checkpoint, 
                              num_procs=args.num_procs, verbose=args.verbose, no_cuda=args.no_cuda, fp16=args.fp16)
+
 if __name__ == "__main__":
     main()

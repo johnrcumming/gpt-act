@@ -1,4 +1,4 @@
-FROM nvidia/cuda:12.1.0-devel-ubuntu22.04
+FROM nvidia/cuda:12.6.0-devel-ubuntu22.04
 
 ENV PATH="/root/miniconda3/bin:${PATH}"
 ARG PATH="/root/miniconda3/bin:${PATH}"
@@ -24,7 +24,9 @@ RUN conda --version
 
 RUN conda install python=3.10 
 # RUN conda install pytorch torchvision torchaudio pytorch-cuda=11.8 -c pytorch -c nvidia 
-RUN pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu121
+#RUN pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
+RUN pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
+
 RUN pip install jupyterlab transformers datasets tensorboard accelerate deepspeed fairscale wandb
 
 RUN mkdir /root/.ssh
@@ -36,9 +38,9 @@ RUN ssh-keyscan github.com >> /root/.ssh/known_hosts
 RUN git config --global user.name "John Cumming"
 RUN git config --global user.email "johnrcumming@gmail.com"
 
-RUN git clone git@github.com:johnrcumming/gpt-act.git
+RUN git clone -b moe_cascade git@github.com:johnrcumming/gpt-act.git
 
-RUN chmod +x gpt-act/launch.sh
+RUN chmod +x /root/gpt-act/launch.sh
 
 # set wandb variables
 ENV WANDB_LOG_MODEL="end"

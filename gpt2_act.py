@@ -1,4 +1,3 @@
-import math
 import torch
 import torch.nn as nn
 import copy
@@ -20,8 +19,9 @@ from transformers.modeling_outputs import ModelOutput
 
 from transformers import GPT2LMHeadModel, GenerationMixin
 
-from embeddings import BinaryPositionEmbedding, RelativePositionEmbedding
-from act import ACTBlock
+from embeddings import BinaryPositionEmbedding
+from moe import MoEACTBlock
+
 
 _CHECKPOINT_FOR_DOC = "gpt2act"
 _CONFIG_FOR_DOC = "GPT2ACTConfig"
@@ -30,7 +30,12 @@ _TOKENIZER_FOR_DOC = "GPT2Tokenizer"
 class GPT2ACTConfig(GPT2Config):
     def __init__(self, act_commitment_cost=1e-3, gradient_checkpointing=False, halting_function_spec=None, layerwise_attn="simple",
                  local_window_size=None, use_relative_position=False, dynamic_stride=None, act_depth=None,
-                 teacher=None, lambda_kd=1e-4, temperature_kd=4.0, use_binary_embedding=False,  **kwargs):
+                 teacher=None, lambda_kd=1e-4, temperature_kd=4.0, use_binary_embedding=False, 
+                 num_experts=4,
+                 experts_top_k=2,
+                 expert_capacity=None,
+                 router_jitter_noise=0.0,
+                 **kwargs):
         """
         :class:`~transformers.GPT2ACTConfig` is the configuration class to store the configuration of a
         :class:`~transformers.GPT2ACTModel`.
@@ -48,6 +53,10 @@ class GPT2ACTConfig(GPT2Config):
             teacher (:obj:`GPT2LMHeadModel`, `optional`, defaults to :obj:`None`):   The teacher model for distillation.
             act_depth (:obj:`int`, :obj:`float`, `optional`, defaults to :obj:`None`):   The depth of the ACT model,  if :obj:`NOne`, use n_embed as depth of ACT blocks
             use_binary_embedding (:obj:`bool`, `optional`, defaults to :obj:`False`):   If :obj:`True`, use binary embedding.
+            num_experts (:obj:`int`, `optional`, defaults to 4):   The number of experts.
+            experts_top_k (:obj:`int`, `optional`, defaults to 2):   The number of top experts.
+            expert_capacity (:obj:`int`, `optional`, defaults to :obj:`None`):   The capacity of each expert.
+            router_jitter_noise (:obj:`float`, `optional`, defaults to 0.0):   The jitter noise of the router.
             kwargs (:obj:`Dict[str, any]`):   Remaining dictionary of keyword arguments from GPT2Config. 
         """
         self.act_commitment_cost = act_commitment_cost
@@ -62,6 +71,10 @@ class GPT2ACTConfig(GPT2Config):
         self.temperature_kd = temperature_kd
         self.teacher = teacher
         self.act_depth = act_depth
+        self.num_experts = num_experts
+        self.experts_top_k = experts_top_k
+        self.expert_capacity = expert_capacity
+        self.router_jitter_noise = router_jitter_noise
 
         super().__init__(**kwargs)
 
@@ -372,8 +385,18 @@ class GPT2ACTModel(GPT2ACTPreTrainedModel):
             self.act_in = None
             self.act_out = None
 
-        self.act_f = ACTBlock(GPT2Block(config), config.n_layer, config.n_embd, act_commitment_cost=act_commitment_cost, 
-                              gradient_checkpointing=gradient_checkpointing, dynamic_stride=config.dynamic_stride, layerwise_attn=config.layerwise_attn)
+        self.act_f = MoEACTBlock(
+            GPT2Block(config), 
+            config.n_layer, 
+            config.n_embd, 
+            num_experts=config.num_experts,  # New config parameter
+            top_k=config.experts_top_k,  # New config parameter
+            act_commitment_cost=act_commitment_cost,
+            gradient_checkpointing=gradient_checkpointing, 
+            dynamic_stride=config.dynamic_stride, 
+            layerwise_attn=config.layerwise_attn
+        )
+        
         self.init_weights()
         # Model parallel
         self.model_parallel = False
@@ -398,8 +421,8 @@ class GPT2ACTModel(GPT2ACTPreTrainedModel):
     def deparallelize(self):
         self.model_parallel = False
         self.device_map = None
-        self.first_device = "cpu"
-        self.last_device = "cpu"
+        self.first_device="cpu"
+        self.last_device="cpu"
         self.wte = self.wte.to(self.first_device)
         self.wpe = self.wpe.to(self.first_device)
         self.ln_f = self.ln_f.to(self.first_device)
@@ -453,6 +476,7 @@ class GPT2ACTModel(GPT2ACTPreTrainedModel):
         elif input_ids is not None:
             input_shape = input_ids.size()
             input_ids = input_ids.view(-1, input_shape[-1])
+
             batch_size = input_ids.shape[0]
         elif inputs_embeds is not None:
             input_shape = inputs_embeds.size()[:-1]
@@ -545,40 +569,58 @@ class GPT2ACTModel(GPT2ACTPreTrainedModel):
                                 use_cache=use_cache,
                                 output_attentions=output_attentions)
 
-        hidden_states, presents, all_hidden_states, all_self_attentions, all_cross_attentions, act_loss, ponder_cost  = outputs
+        if len(outputs) == 7:
+            hidden_states, presents, all_hidden_states, all_self_attentions, all_cross_attentions, act_loss, ponder_cost  = outputs
 
-        if self.act_out is not None:
-            hidden_states = self.act_out(hidden_states)
+            if self.act_out is not None:
+                hidden_states = self.act_out(hidden_states)
 
-        # Model Parallel: If it's the last layer for that device, put things on the next device
-        if self.model_parallel:
-            hidden_states = hidden_states.to(self.first_device)
-            act_loss = act_loss.to(self.first_device)
-            ponder_cost = ponder_cost.to(self.first_device)
+            # Model Parallel: If it's the last layer for that device, put things on the next device
+            if self.model_parallel:
+                hidden_states = hidden_states.to(self.first_device)
+                act_loss = act_loss.to(self.first_device)
+                ponder_cost = ponder_cost.to(self.first_device)
 
 
-        hidden_states = self.ln_f(hidden_states)
+            hidden_states = self.ln_f(hidden_states)
 
-        hidden_states = hidden_states.view(*output_shape)
-        
-        # Add last hidden state
-        if output_hidden_states:
-            all_hidden_states = all_hidden_states + (hidden_states,)
+            hidden_states = hidden_states.view(*output_shape)
+            
+            # Add last hidden state
+            if output_hidden_states:
+                all_hidden_states = all_hidden_states + (hidden_states,)
 
-        if not return_dict:
-            return tuple(v for v in [hidden_states, presents, all_hidden_states, all_self_attentions, act_loss, ponder_cost] if v is not None)
+            if not return_dict:
+                return tuple(v for v in [hidden_states, presents, all_hidden_states, all_self_attentions, act_loss, ponder_cost] if v is not None)
 
-        return ACTModelOutputWithPastAndCrossAttentions(
-            last_hidden_state=hidden_states,
-            past_key_values=presents,
-            hidden_states=all_hidden_states,
-            attentions=all_self_attentions,
-            cross_attentions=all_cross_attentions,
-            act_loss=act_loss,
-            ponder_cost=ponder_cost,
-        )
+            return ACTModelOutputWithPastAndCrossAttentions(
+                last_hidden_state=hidden_states,
+                past_key_values=presents,
+                hidden_states=all_hidden_states,
+                attentions=all_self_attentions,
+                cross_attentions=all_cross_attentions,
+                act_loss=act_loss,
+                ponder_cost=ponder_cost,
+            )
+        elif len(outputs) == 3:
+            combined_output, act_loss, ponder_cost = outputs
+            # Properly format output for Hugging Face transformers compatibility
+            if not return_dict:
+                return tuple(v for v in [combined_output, None, None, None, None, act_loss, ponder_cost] if v is not None)
+            
+            return ACTModelOutputWithPastAndCrossAttentions(
+                last_hidden_state=combined_output,
+                past_key_values=None,
+                hidden_states=None,
+                attentions=None,
+                cross_attentions=None,
+                act_loss=act_loss,
+                ponder_cost=ponder_cost,
+            )
+        else:
+            raise ValueError(f"Unexpected number of outputs: {len(outputs)}")
     
-class GPT2ACTLMHeadModel(GPT2ACTPreTrainedModel):
+class GPT2ACTLMHeadModel(GPT2ACTPreTrainedModel, GenerationMixin):
     _keys_to_ignore_on_load_missing = [r"h\.\d+\.attn\.masked_bias", r"lm_head\.weight"]
 
     def __init__(self, config):
@@ -627,6 +669,23 @@ class GPT2ACTLMHeadModel(GPT2ACTPreTrainedModel):
 
     def set_output_embeddings(self, new_embeddings):
         self.lm_head = new_embeddings
+        
+    def save_pretrained(self, save_directory, safe_serialization=False, **kwargs):
+        """
+        Save a model with its configuration file to a directory, so that it can be re-loaded using the
+        `from_pretrained` class method.
+        
+        Arguments:
+            save_directory (`str`):
+                Directory to which to save. Will be created if it doesn't exist.
+            safe_serialization (`bool`, *optional*, defaults to `False`):
+                Whether to save the model using `safetensors` or the traditional PyTorch way with `pickle`.
+                Set to False to address shared tensor issue between lm_head.weight and transformer.wte.weight.
+            **kwargs:
+                Additional key word arguments passed along to the `push_to_hub` method.
+        """
+        # Setting safe_serialization=False to fix the error with shared tensors
+        return super().save_pretrained(save_directory, safe_serialization=False, **kwargs)
 
     def prepare_inputs_for_generation(self, input_ids, past=None, **kwargs):
         token_type_ids = kwargs.get("token_type_ids", None)
@@ -795,11 +854,33 @@ class GPT2ACTDistilation(GPT2ACTPreTrainedModel):
 
 
     def to_device(self, device="cpu", **kwargs):
+        """ Move teacher and student to device via to() method """
+        self.teacher.to(device, **kwargs)
+        self.student.to(device, **kwargs)
+        
         if self.model_parallel:
             return {k: kwargs[k].to(device) if kwargs[k] is not None else None for k in kwargs}
         else:
             return kwargs
+        
+    def save_pretrained(self, save_directory, safe_serialization=False, **kwargs):
+        """
+        Save a model with its configuration file to a directory, so that it can be re-loaded using the
+        `from_pretrained` class method.
+        
+        Arguments:
+            save_directory (`str`):
+                Directory to which to save. Will be created if it doesn't exist.
+            safe_serialization (`bool`, *optional*, defaults to `False`):
+                Whether to save the model using `safetensors` or the traditional PyTorch way with `pickle`.
+                Set to False to address shared tensor issue between lm_head.weight and transformer.wte.weight.
+            **kwargs:
+                Additional key word arguments passed along to the `push_to_hub` method.
+        """
+        # Setting safe_serialization=False to fix the error with shared tensors
+        return self.student.save_pretrained(save_directory, safe_serialization=False, **kwargs)
 
+    @add_start_docstrings_to_model_forward(GPT2_INPUTS_DOCSTRING)
     def forward(
         self,
         input_ids=None,
