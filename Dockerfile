@@ -29,16 +29,16 @@ RUN pip3 install torch torchvision torchaudio --index-url https://download.pytor
 
 RUN pip install jupyterlab transformers datasets tensorboard accelerate deepspeed fairscale wandb
 
-RUN mkdir /root/.ssh
-ADD id_rsa /root/.ssh/
-RUN chmod -R 700 ~/.ssh/id_rsa
+#RUN mkdir /root/.ssh
+#ADD id_rsa /root/.ssh/
+#RUN chmod -R 700 ~/.ssh/id_rsa
 
-RUN ssh-keyscan github.com >> /root/.ssh/known_hosts
+#RUN ssh-keyscan github.com >> /root/.ssh/known_hosts
 
 RUN git config --global user.name "John Cumming"
 RUN git config --global user.email "johnrcumming@gmail.com"
 
-RUN git clone -b moe_cascade git@github.com:johnrcumming/gpt-act.git
+RUN git clone https://github.com/johnrcumming/gpt-act.git
 
 RUN chmod +x /root/gpt-act/launch.sh
 
