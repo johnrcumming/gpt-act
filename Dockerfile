@@ -38,7 +38,7 @@ RUN git config --global user.email "johnrcumming@gmail.com"
 
 RUN git clone -b moe_cascade git@github.com:johnrcumming/gpt-act.git
 
-RUN chmod +x gpt-act/launch.sh
+RUN chmod +x /root/gpt-act/train.sh
 
 # set wandb variables
 ENV WANDB_LOG_MODEL="end"
@@ -47,4 +47,4 @@ EXPOSE 8888
 EXPOSE 6006
 EXPOSE 22
 
-ENTRYPOINT ["/root/gpt-act/launch.sh"]
+ENTRYPOINT ["/root/gpt-act/train.sh"]
