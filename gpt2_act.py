@@ -17,7 +17,7 @@ from transformers.utils.model_parallel_utils import assert_device_map, get_devic
 
 from transformers.modeling_outputs import ModelOutput
 
-from transformers import GPT2LMHeadModel
+from transformers import GPT2LMHeadModel, GenerationMixin
 
 from embeddings import BinaryPositionEmbedding
 from moe import MoEACTBlock
@@ -78,7 +78,7 @@ class GPT2ACTConfig(GPT2Config):
 
         super().__init__(**kwargs)
 
-class GPT2ACTPreTrainedModel(PreTrainedModel):
+class GPT2ACTPreTrainedModel(PreTrainedModel, GenerationMixin):
     """
     An abstract class to handle weights initialization and a simple interface for downloading and loading pretrained
     models.
