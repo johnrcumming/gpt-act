@@ -32,6 +32,8 @@ jobs:
         run: |
           docker build --platform linux/amd64 \
             --build-arg CACHE_BUST=${{ env.timestamp }} \
+            --build-arg WANDB_KEY=${{ secrets.WANDB_KEY }} \
+            --build-arg HUGGINGFACE_TOKEN=${{ secrets.HUGGINGFACE_TOKEN }} \
             -t johnrcumming001/gpt2act:${{ env.timestamp }} .
 
       # Step 5: Push the Docker image to Docker Hub

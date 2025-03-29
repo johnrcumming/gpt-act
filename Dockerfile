@@ -27,18 +27,19 @@ RUN conda install python=3.10
 #RUN pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
 RUN pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
 
-RUN pip install jupyterlab transformers datasets tensorboard accelerate deepspeed fairscale wandb
+RUN pip install jupyterlab transformers datasets tensorboard accelerate deepspeed fairscale 
+RUN pip install wandb "huggingface_hub[cli]"
 
-#RUN mkdir /root/.ssh
-#ADD id_rsa /root/.ssh/
-#RUN chmod -R 700 ~/.ssh/id_rsa
+RUN git config --global user.name "gpt2act bot"
+RUN git config --global user.email "noreply@undertheradar.ai"
 
-#RUN ssh-keyscan github.com >> /root/.ssh/known_hosts
-
-RUN git config --global user.name "John Cumming"
-RUN git config --global user.email "johnrcumming@gmail.com"
-
+ENV CACHE_BUST=1
 RUN git clone https://github.com/johnrcumming/gpt-act.git
+
+ENV WANDB_KEY=""
+ENV HUGGINGFACE_TOKEN=""
+RUN wandb login $WANDB_KEY
+RUN huggingface-cli login --token $HF_TOKEN --add-to-git-credential
 
 RUN chmod +x /root/gpt-act/launch.sh
 
@@ -47,6 +48,5 @@ ENV WANDB_LOG_MODEL="end"
 
 EXPOSE 8888
 EXPOSE 6006
-EXPOSE 22
 
 ENTRYPOINT ["/root/gpt-act/launch.sh"]
