@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from transformers.models.gpt2.modeling_gpt2 import GPT2Block
 from transformers.models.gpt2.configuration_gpt2 import GPT2Config
 
-from transformers.modeling_utils import Conv1D, PreTrainedModel
+from transformers.modeling_utils import Conv1D, PreTrainedModel, GenerationMixin
 from transformers.file_utils import ModelOutput, add_start_docstrings, add_code_sample_docstrings, add_start_docstrings_to_model_forward, replace_return_docstrings
 
 from transformers.utils.model_parallel_utils import assert_device_map, get_device_map
@@ -620,7 +620,7 @@ class GPT2ACTModel(GPT2ACTPreTrainedModel):
         else:
             raise ValueError(f"Unexpected number of outputs: {len(outputs)}")
     
-class GPT2ACTLMHeadModel(GPT2ACTPreTrainedModel):
+class GPT2ACTLMHeadModel(GPT2ACTPreTrainedModel, GenerationMixin):
     _keys_to_ignore_on_load_missing = [r"h\.\d+\.attn\.masked_bias", r"lm_head\.weight"]
 
     def __init__(self, config):
