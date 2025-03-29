@@ -122,7 +122,7 @@ def preprocess_dataset(model_config, data_dir='data', cache_dir=None, dataset_na
         model_max_length = tokenizer.model_max_length
         tokenizer.model_max_length = int(1e20)  # LARGE_INTEGER
 
-        dataset = datasets.load_dataset(dataset_name, dataset_config, data_dir=dataset_dir, cache_dir=cache_dir, num_proc=num_procs)
+        dataset = datasets.load_dataset(dataset_name, dataset_config, num_proc=num_procs)
 
         if 'text' in dataset['train'].column_names:
             field = 'text'
