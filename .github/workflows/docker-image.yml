@@ -38,3 +38,5 @@ jobs:
       - name: Push Docker Image
         run: |
           docker push johnrcumming001/gpt2act:${{ env.timestamp }}
+          docker tag johnrcumming001/gpt2act:${{ env.timestamp }} johnrcumming001/gpt2act:latest
+          docker push johnrcumming001/gpt2act:latest
