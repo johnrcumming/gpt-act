@@ -54,7 +54,7 @@ class MoEACTBlock(nn.Module):
                 
             # Get the weights for this expert
             expert_weights = torch.zeros(
-                (batch_size, seq_len, 1), device=hidden_states.device
+                (batch_size, seq_len, 1), device=hidden_states.device, dtype=top_k_weights.dtype
             )
             
             for k in range(self.top_k):
