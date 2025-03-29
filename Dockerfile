@@ -33,13 +33,20 @@ RUN pip install wandb "huggingface_hub[cli]"
 RUN git config --global user.name "gpt2act bot"
 RUN git config --global user.email "noreply@undertheradar.ai"
 
-ENV CACHE_BUST=1
+# Add a build argument for CACHE_BUST
+ARG CACHE_BUST=1
 RUN git clone https://github.com/johnrcumming/gpt-act.git
 
-ENV WANDB_KEY=""
-ENV HUGGINGFACE_TOKEN=""
+# Add a build argument for WANDB_KEY and HUGGINGFACE_TOKEN
+ARG WANDB_KEY
+ARG HUGGINGFACE_TOKEN
+
+# Set the environment variables
+ENV WANDB_KEY=$WANDB_KEY
+ENV HUGGINGFACE_TOKEN=$HUGGINGFACE_TOKEN
+
 RUN wandb login $WANDB_KEY
-RUN huggingface-cli login --token $HF_TOKEN --add-to-git-credential
+RUN huggingface-cli login --token $HUGGINGFACE_TOKEN --add-to-git-credential
 
 RUN chmod +x /root/gpt-act/launch.sh
 
