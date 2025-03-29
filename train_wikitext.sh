@@ -1,7 +1,7 @@
 #!/bin/sh
 
 python gpt2act_trainer.py --preprocess_dataset \
-    --dataset openwebtext
+    --dataset wikitext
 
 echo "0d5aafa6289fc5658cf704549ba07b9d470ab7b7" | wandb login --relogin
 
@@ -12,7 +12,7 @@ accelerate config --multi_gpu \
     --distributed_type MULTI_GPU
 
 accelerate launch gpt2act_trainer.py --train_model \
-    --dataset openwebtext \
+    --dataset wikitext \
     --train_batch_size=24 \
     --eval_batch_size=24 \
     --gradient_accumulation_steps=512 \
