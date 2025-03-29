@@ -1,6 +1,7 @@
 .devcontainer
 id_rsa
 id_rsa.pub
+.env
 data/
 runs/
 checkpoints/

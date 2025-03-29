@@ -3,8 +3,6 @@
 python gpt2act_trainer.py --preprocess_dataset \
     --dataset wikitext
 
-echo "0d5aafa6289fc5658cf704549ba07b9d470ab7b7" | wandb login --relogin
-
 accelerate config --multi_gpu \
     --num_processes 4 \
     --num_machines 1 \
