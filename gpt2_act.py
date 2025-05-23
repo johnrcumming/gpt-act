@@ -10,7 +10,8 @@ from dataclasses import dataclass
 from transformers.models.gpt2.modeling_gpt2 import GPT2Block
 from transformers.models.gpt2.configuration_gpt2 import GPT2Config
 
-from transformers.modeling_utils import Conv1D, PreTrainedModel, GenerationMixin
+from transformers.modeling_utils import Conv1D, PreTrainedModel
+from transformers.generation.utils import GenerationMixin 
 from transformers.file_utils import ModelOutput, add_start_docstrings, add_code_sample_docstrings, add_start_docstrings_to_model_forward, replace_return_docstrings
 
 from transformers.utils.model_parallel_utils import assert_device_map, get_device_map
@@ -18,9 +19,10 @@ from transformers.utils.model_parallel_utils import assert_device_map, get_devic
 from transformers.modeling_outputs import ModelOutput
 
 from transformers import GPT2LMHeadModel, GenerationMixin
+import torch.nn.functional as F
 
 from embeddings import BinaryPositionEmbedding
-from moe import MoEACTBlock
+from moe import MoEACTBlock, MoELayer
 
 
 _CHECKPOINT_FOR_DOC = "gpt2act"
@@ -35,6 +37,11 @@ class GPT2ACTConfig(GPT2Config):
                  experts_top_k=2,
                  expert_capacity=None,
                  router_jitter_noise=0.0,
+                 # MoELayer specific configurations
+                 moe_layer_type: str = "MoEACTBlock", # Type of MoE layer: "MoEACTBlock" or "MoELayer"
+                 expert_type: str = "ffn",            # Type of expert for MoELayer: "ffn", "transformer_block", etc.
+                 expert_hidden_size: Optional[int] = None, # Hidden size for FFN experts in MoELayer
+                 expert_intermediate_size: Optional[int] = None, # Intermediate size for FFN experts in MoELayer (e.g., 4 * expert_hidden_size)
                  **kwargs):
         """
         :class:`~transformers.GPT2ACTConfig` is the configuration class to store the configuration of a
@@ -53,10 +60,14 @@ class GPT2ACTConfig(GPT2Config):
             teacher (:obj:`GPT2LMHeadModel`, `optional`, defaults to :obj:`None`):   The teacher model for distillation.
             act_depth (:obj:`int`, :obj:`float`, `optional`, defaults to :obj:`None`):   The depth of the ACT model,  if :obj:`NOne`, use n_embed as depth of ACT blocks
             use_binary_embedding (:obj:`bool`, `optional`, defaults to :obj:`False`):   If :obj:`True`, use binary embedding.
-            num_experts (:obj:`int`, `optional`, defaults to 4):   The number of experts.
-            experts_top_k (:obj:`int`, `optional`, defaults to 2):   The number of top experts.
-            expert_capacity (:obj:`int`, `optional`, defaults to :obj:`None`):   The capacity of each expert.
-            router_jitter_noise (:obj:`float`, `optional`, defaults to 0.0):   The jitter noise of the router.
+            num_experts (:obj:`int`, `optional`, defaults to 4):   The number of experts for MoE layers.
+            experts_top_k (:obj:`int`, `optional`, defaults to 2):   The number of top experts to route to for MoE layers.
+            expert_capacity (:obj:`int`, `optional`, defaults to :obj:`None`):   The capacity of each expert. (Primarily for `MoEACTBlock` or specific MoE implementations)
+            router_jitter_noise (:obj:`float`, `optional`, defaults to 0.0):   The jitter noise for the MoE router.
+            moe_layer_type (:obj:`str`, `optional`, defaults to "MoEACTBlock"): Specifies the MoE layer implementation. Can be "MoEACTBlock" or "MoELayer".
+            expert_type (:obj:`str`, `optional`, defaults to "ffn"): If `moe_layer_type` is "MoELayer", this specifies the type of expert module (e.g., "ffn").
+            expert_hidden_size (:obj:`int`, `optional`, defaults to :obj:`None`): If `moe_layer_type` is "MoELayer" and `expert_type` is "ffn", this specifies the hidden size of the FFN expert. Defaults to `n_embd`.
+            expert_intermediate_size (:obj:`int`, `optional`, defaults to :obj:`None`): If `moe_layer_type` is "MoELayer" and `expert_type` is "ffn", this specifies the intermediate size of the FFN expert. Defaults to `4 * expert_hidden_size`.
             kwargs (:obj:`Dict[str, any]`):   Remaining dictionary of keyword arguments from GPT2Config. 
         """
         self.act_commitment_cost = act_commitment_cost
@@ -71,10 +82,29 @@ class GPT2ACTConfig(GPT2Config):
         self.temperature_kd = temperature_kd
         self.teacher = teacher
         self.act_depth = act_depth
+        
+        # MoE configurations
         self.num_experts = num_experts
         self.experts_top_k = experts_top_k
-        self.expert_capacity = expert_capacity
-        self.router_jitter_noise = router_jitter_noise
+        self.expert_capacity = expert_capacity # May not be used by MoELayer directly, depends on expert impl.
+        self.router_jitter_noise = router_jitter_noise # May not be used by MoELayer's router by default
+
+        self.moe_layer_type = moe_layer_type
+        self.expert_type = expert_type
+        
+        # Expert specific configurations, initialized with defaults based on other config if None
+        if moe_layer_type == "MoELayer":
+            self.expert_hidden_size = expert_hidden_size if expert_hidden_size is not None else kwargs.get('n_embd', None)
+            if self.expert_hidden_size is None and 'n_embd' not in kwargs:
+                 # This case should ideally be handled by GPT2Config ensuring n_embd is present
+                 pass # Or raise error, but GPT2Config should have n_embd
+            self.expert_intermediate_size = expert_intermediate_size if expert_intermediate_size is not None and self.expert_hidden_size is not None \
+                                          else (4 * self.expert_hidden_size if self.expert_hidden_size is not None else None)
+        else:
+            # For MoEACTBlock or other types, these specific expert configs might not be relevant in the same way
+            self.expert_hidden_size = None
+            self.expert_intermediate_size = None
+
 
         super().__init__(**kwargs)
 
@@ -349,53 +379,102 @@ DEPARALLELIZE_DOCSTRING = r"""
     GPT2_START_DOCSTRING,
 )        
 class GPT2ACTModel(GPT2ACTPreTrainedModel):
-    def __init__(self, config):
+    def __init__(self, config): # config is self.config
         super().__init__(config)
 
         if isinstance(config, GPT2ACTConfig):
             act_commitment_cost = config.act_commitment_cost
             gradient_checkpointing = config.gradient_checkpointing
-        else:
+            self.moe_layer_type = config.moe_layer_type 
+        else: 
             act_commitment_cost = 1e-3
             gradient_checkpointing = False
+            self.moe_layer_type = "MoEACTBlock" 
 
         if config.use_binary_embedding:
             self.wte = BinaryPositionEmbedding(config.vocab_size, config.n_embd)
             self.wpe = BinaryPositionEmbedding(config.n_positions, config.n_embd)
         else:
-            self.wte = nn.Embedding(config.vocab_size, config.n_embd)  # Word Embedding 
-            self.wpe = nn.Embedding(config.n_positions, config.n_embd) # Position Embedding
+            self.wte = nn.Embedding(config.vocab_size, config.n_embd)
+            self.wpe = nn.Embedding(config.n_positions, config.n_embd)
 
         self.drop = nn.Dropout(config.embd_pdrop)
         self.ln_f = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
 
+        original_n_embd = config.n_embd # Save original n_embd
+        config_for_experts = config 
+
         if config.act_depth is not None:
             if isinstance(config.act_depth, int):
-                act_depth = config.act_depth
+                act_depth_val = config.act_depth
             elif isinstance(config.act_depth, float):
-                act_depth = int(config.n_embd * config.act_depth)
+                act_depth_val = int(original_n_embd * config.act_depth) # Use original_n_embd for calculation
             else:
                 raise ValueError("config.act_depth must be int or float")
 
-            self.act_in = nn.Linear(config.n_embd, act_depth)
-            self.act_out = nn.Linear(act_depth, config.n_embd)
-            config = copy.deepcopy(config)
-            config.n_embd = act_depth
+            self.act_in = nn.Linear(original_n_embd, act_depth_val)
+            self.act_out = nn.Linear(act_depth_val, original_n_embd)
+            
+            config_for_experts = copy.deepcopy(config)
+            config_for_experts.n_embd = act_depth_val 
+            effective_embd_dim_for_experts = act_depth_val
         else:
             self.act_in = None
             self.act_out = None
+            effective_embd_dim_for_experts = original_n_embd
+            # config_for_experts remains the original config object, no copy needed if n_embd isn't changed for experts
 
-        self.act_f = MoEACTBlock(
-            GPT2Block(config), 
-            config.n_layer, 
-            config.n_embd, 
-            num_experts=config.num_experts,  # New config parameter
-            top_k=config.experts_top_k,  # New config parameter
-            act_commitment_cost=act_commitment_cost,
-            gradient_checkpointing=gradient_checkpointing, 
-            dynamic_stride=config.dynamic_stride, 
-            layerwise_attn=config.layerwise_attn
-        )
+        if self.moe_layer_type == "MoELayer":
+            if config.expert_type == "ffn":
+                ffn_io_dim = effective_embd_dim_for_experts
+                
+                # Determine FFN intermediate size more robustly
+                current_expert_intermediate_size = config.expert_intermediate_size
+                # config.expert_hidden_size defaults to original_n_embd in GPT2ACTConfig
+                
+                # Check if the current_expert_intermediate_size was likely defaulted from original_n_embd settings
+                is_expert_hidden_size_defaulted_to_original_n_embd = (config.expert_hidden_size == original_n_embd)
+                is_intermediate_size_defaulted_based_on_hidden = \
+                    (is_expert_hidden_size_defaulted_to_original_n_embd and \
+                     current_expert_intermediate_size == 4 * config.expert_hidden_size)
+
+                if is_intermediate_size_defaulted_based_on_hidden and ffn_io_dim != original_n_embd:
+                    # Intermediate size was auto-defaulted based on original_n_embd, 
+                    # but experts now operate on ffn_io_dim (act_depth). Recalculate.
+                    ffn_intermediate_dim = 4 * ffn_io_dim
+                else:
+                    # User likely set a specific intermediate size, or ffn_io_dim is same as original_n_embd,
+                    # or expert_hidden_size was set to match ffn_io_dim. Use the configured intermediate_size.
+                    ffn_intermediate_dim = current_expert_intermediate_size
+                
+                if ffn_intermediate_dim is None: # Fallback, though GPT2ACTConfig should provide a default
+                    ffn_intermediate_dim = 4 * ffn_io_dim
+
+                experts = nn.ModuleList([
+                    _FeedForwardExpert(
+                        input_size=ffn_io_dim, 
+                        intermediate_size=ffn_intermediate_dim,
+                        output_size=ffn_io_dim 
+                    ) for _ in range(config.num_experts)
+                ])
+                router = nn.Linear(effective_embd_dim_for_experts, config.num_experts)
+                self.act_f = MoELayer(experts, router, top_k=config.experts_top_k)
+            else:
+                raise ValueError(f"Unsupported expert_type '{config.expert_type}' for MoELayer.")
+        elif self.moe_layer_type == "MoEACTBlock":
+            self.act_f = MoEACTBlock(
+                GPT2Block(config_for_experts), 
+                config_for_experts.n_layer, # Use n_layer from config_for_experts
+                effective_embd_dim_for_experts, 
+                num_experts=config.num_experts,
+                top_k=config.experts_top_k,
+                act_commitment_cost=act_commitment_cost,
+                gradient_checkpointing=gradient_checkpointing, 
+                dynamic_stride=config.dynamic_stride, 
+                layerwise_attn=config.layerwise_attn
+            )
+        else:
+            raise ValueError(f"Unknown moe_layer_type: {self.moe_layer_type}")
         
         self.init_weights()
         # Model parallel
@@ -569,56 +648,85 @@ class GPT2ACTModel(GPT2ACTPreTrainedModel):
                                 use_cache=use_cache,
                                 output_attentions=output_attentions)
 
-        if len(outputs) == 7:
-            hidden_states, presents, all_hidden_states, all_self_attentions, all_cross_attentions, act_loss, ponder_cost  = outputs
+        # Initialize fields for ACTModelOutputWithPastAndCrossAttentions
+        presents_final = None
+        all_hidden_states_final = None
+        all_self_attentions_final = None
+        all_cross_attentions_final = None 
+        act_loss_final = None
+        ponder_cost_final = None
 
-            if self.act_out is not None:
-                hidden_states = self.act_out(hidden_states)
-
-            # Model Parallel: If it's the last layer for that device, put things on the next device
-            if self.model_parallel:
-                hidden_states = hidden_states.to(self.first_device)
-                act_loss = act_loss.to(self.first_device)
-                ponder_cost = ponder_cost.to(self.first_device)
-
-
-            hidden_states = self.ln_f(hidden_states)
-
-            hidden_states = hidden_states.view(*output_shape)
-            
-            # Add last hidden state
-            if output_hidden_states:
-                all_hidden_states = all_hidden_states + (hidden_states,)
-
-            if not return_dict:
-                return tuple(v for v in [hidden_states, presents, all_hidden_states, all_self_attentions, act_loss, ponder_cost] if v is not None)
-
-            return ACTModelOutputWithPastAndCrossAttentions(
-                last_hidden_state=hidden_states,
-                past_key_values=presents,
-                hidden_states=all_hidden_states,
-                attentions=all_self_attentions,
-                cross_attentions=all_cross_attentions,
-                act_loss=act_loss,
-                ponder_cost=ponder_cost,
-            )
-        elif len(outputs) == 3:
-            combined_output, act_loss, ponder_cost = outputs
-            # Properly format output for Hugging Face transformers compatibility
-            if not return_dict:
-                return tuple(v for v in [combined_output, None, None, None, None, act_loss, ponder_cost] if v is not None)
-            
-            return ACTModelOutputWithPastAndCrossAttentions(
-                last_hidden_state=combined_output,
-                past_key_values=None,
-                hidden_states=None,
-                attentions=None,
-                cross_attentions=None,
-                act_loss=act_loss,
-                ponder_cost=ponder_cost,
-            )
+        if self.moe_layer_type == "MoELayer":
+            hidden_states = outputs 
+            act_loss_final = torch.tensor(0.0, device=hidden_states.device, dtype=hidden_states.dtype)
+            ponder_cost_final = torch.tensor(0.0, device=hidden_states.device, dtype=hidden_states.dtype)
+            # presents_final, all_hidden_states_final (initially), all_self_attentions_final, all_cross_attentions_final remain None
+        elif self.moe_layer_type == "MoEACTBlock":
+            if len(outputs) == 7: 
+                hidden_states, presents_final, all_hidden_states_final, all_self_attentions_final, all_cross_attentions_final, act_loss_final, ponder_cost_final = outputs
+            elif len(outputs) == 3: 
+                hidden_states, act_loss_final, ponder_cost_final = outputs
+                # presents_final, all_hidden_states_final (initially), etc. remain None
+            else:
+                raise ValueError(f"Unexpected number of outputs from MoEACTBlock: {len(outputs)}")
         else:
-            raise ValueError(f"Unexpected number of outputs: {len(outputs)}")
+            raise ValueError(f"Unknown moe_layer_type during forward: {self.moe_layer_type}")
+
+        if self.act_out is not None:
+            hidden_states = self.act_out(hidden_states)
+
+        if self.model_parallel: # Apply to relevant tensors that are not None
+            hidden_states = hidden_states.to(self.first_device)
+            if act_loss_final is not None: act_loss_final = act_loss_final.to(self.first_device)
+            if ponder_cost_final is not None: ponder_cost_final = ponder_cost_final.to(self.first_device)
+            # Note: presents_final, all_hidden_states_final etc. are more complex for model parallelism if they span devices.
+            # Current MoEACTBlock/MoELayer design keeps them on the MoE layer's device or returns None.
+
+        hidden_states = self.ln_f(hidden_states)
+        hidden_states = hidden_states.view(*output_shape)
+        
+        if output_hidden_states:
+            if all_hidden_states_final is None: 
+                 all_hidden_states_final = (hidden_states,)
+            else:
+                 all_hidden_states_final = all_hidden_states_final + (hidden_states,)
+
+        if not return_dict:
+            raw_output_tuple = (
+                hidden_states, 
+                presents_final, 
+                all_hidden_states_final, 
+                all_self_attentions_final, 
+                all_cross_attentions_final, 
+                act_loss_final, 
+                ponder_cost_final
+            )
+            return tuple(v for v in raw_output_tuple if v is not None)
+
+        return ACTModelOutputWithPastAndCrossAttentions(
+            last_hidden_state=hidden_states,
+            past_key_values=presents_final,
+            hidden_states=all_hidden_states_final,
+            attentions=all_self_attentions_final,
+            cross_attentions=all_cross_attentions_final,
+            act_loss=act_loss_final,
+            ponder_cost=ponder_cost_final,
+        )
+# Helper class for FFN expert
+class _FeedForwardExpert(nn.Module):
+    def __init__(self, input_size, intermediate_size, output_size, activation_function=F.gelu):
+        super().__init__()
+        self.fc1 = nn.Linear(input_size, intermediate_size)
+        self.activation_fn = activation_function
+        self.fc2 = nn.Linear(intermediate_size, output_size)
+        # Consider adding dropout based on config if needed, e.g., config.resid_pdrop
+
+    def forward(self, hidden_states, *args, **kwargs): # Ensure expert signature compatibility
+        hidden_states = self.fc1(hidden_states)
+        hidden_states = self.activation_fn(hidden_states)
+        hidden_states = self.fc2(hidden_states)
+        return hidden_states
+
     
 class GPT2ACTLMHeadModel(GPT2ACTPreTrainedModel, GenerationMixin):
     _keys_to_ignore_on_load_missing = [r"h\.\d+\.attn\.masked_bias", r"lm_head\.weight"]

@@ -92,3 +92,73 @@ class MoEACTBlock(nn.Module):
         
         # Return combined output and losses
         return combined_output, act_loss, ponder_cost
+
+
+class MoELayer(nn.Module):
+    def __init__(self, experts: nn.ModuleList, router: nn.Module, top_k: int = 2):
+        super().__init__()
+        self.experts = experts
+        self.router = router
+        self.num_experts = len(experts)
+        self.top_k = min(top_k, self.num_experts)
+
+    def forward(self, hidden_states: torch.Tensor, *args, **kwargs):
+        batch_size, seq_len, hidden_size = hidden_states.shape
+
+        # Get routing logits from the router
+        router_logits = self.router(hidden_states)  # [batch_size, seq_len, num_experts]
+
+        # Get routing weights (probabilities) by applying softmax
+        routing_weights = F.softmax(router_logits, dim=-1)
+
+        # Select top-k experts and their weights
+        top_k_weights, top_k_indices = torch.topk(routing_weights, k=self.top_k, dim=-1)
+
+        # Normalize top-k weights
+        top_k_weights = top_k_weights / top_k_weights.sum(dim=-1, keepdim=True)
+
+        # Initialize final output tensor
+        final_output = torch.zeros_like(hidden_states)
+
+        # Iterate over each expert
+        for i in range(self.num_experts):
+            # Create a mask for tokens routed to this expert
+            expert_mask = (top_k_indices == i).any(dim=-1) # True for tokens that have this expert in their top_k
+
+            if not expert_mask.any():
+                continue
+
+            # Create a mask for selecting the weights for the current expert
+            # This mask will be [batch_size, seq_len, top_k]
+            idx_mask = top_k_indices == i
+            
+            # Gather the weights for the current expert.
+            # Weights are [batch_size, seq_len, top_k]. We want to sum weights if a token is routed to expert 'i' multiple times (though top_k usually < num_experts, so less likely unless k=num_experts)
+            # For simplicity, we assume each expert is chosen at most once in top_k for a given token, or if chosen multiple times, its weight appears multiple times in top_k_weights.
+            # The current approach correctly sums weights if an expert is listed multiple times in top_k_indices for a token.
+            current_expert_weights = (top_k_weights * idx_mask).sum(dim=-1, keepdim=True) # [batch_size, seq_len, 1]
+
+            # Select tokens for the current expert
+            # hidden_states_expert = hidden_states[expert_mask] # This would flatten the batch_size and seq_len dimensions
+            
+            # Instead, we want to pass all hidden_states and let the expert process them.
+            # The output will be weighted, so only tokens routed to this expert will contribute meaningfully.
+            # This is a simplification. A more optimized approach would be to select and then process.
+            # However, for generality of expert (e.g. if expert expects full sequence), this is safer.
+            
+            # Process with the expert
+            expert_output = self.experts[i](hidden_states, *args, **kwargs) # Pass through any additional args/kwargs
+
+            # Ensure expert_output is a tensor
+            if isinstance(expert_output, tuple): # If expert returns multiple values (e.g. output, other_losses)
+                expert_output_tensor = expert_output[0]
+            else:
+                expert_output_tensor = expert_output
+            
+            # Weight the expert output
+            weighted_output = expert_output_tensor * current_expert_weights
+            
+            # Add to the final output
+            final_output += weighted_output
+            
+        return final_output
